@@ -17,11 +17,11 @@ from tqdm import tqdm
 
 from losses.losses import LossManager, autoEncoderLoss, roboticPriorsLoss, tripletLoss, rewardModelLoss, \
     rewardPriorLoss, forwardModelLoss, inverseModelLoss, episodePriorLoss, l1Loss, l2Loss, kullbackLeiblerLoss, \
-    perceptualSimilarityLoss, generationLoss, ganNonSaturateLoss
+    kullbackLeiblerLossCCI, perceptualSimilarityLoss, generationLoss, ganNonSaturateLoss
 from losses.utils import findPriorsPairs
 from pipeline import NAN_ERROR
 from plotting.representation_plot import plotRepresentation, plotImage, printGTC
-from preprocessing.data_loader import DataLoader, RobotEnvDataset
+from preprocessing.data_loader import DataLoader, convertScalerToVectorAction, RobotEnvDataset
 from preprocessing.utils import deNormalize
 from utils import printRed, detachToNumpy, printYellow
 from .modules import SRLModules
@@ -48,14 +48,16 @@ class BaseLearner(object):
     Base class for a method that learn a state representation
     from observations
     :param state_dim: (int)
+    :param class_dim: (int)
     :param batch_size: (int)
     :param seed: (int)
     :param cuda: (int) (default -1, CPU) equi to CUDA_VISIBLE_DEVICES
     """
 
-    def __init__(self, state_dim, batch_size, seed=1, cuda=-1):
+    def __init__(self, state_dim, class_dim, batch_size, seed=1, cuda=-1):
         super(BaseLearner, self).__init__()
         self.state_dim = state_dim
+        self.class_dim = class_dim
         self.batch_size = batch_size
         self.module = None
         self.seed = seed

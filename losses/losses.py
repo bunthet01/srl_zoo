@@ -82,7 +82,7 @@ def roboticPriorsLoss(states, next_states, minibatch_idx,
 
     state_diff = next_states - states
     state_diff_norm = state_diff.norm(2, dim=1)
-    def similarity(x, y): return th.exp(-(x - y).norm(2, dim=1) ** 2)
+    similarity = lambda x, y: th.exp(-(x - y).norm(2, dim=1) ** 2)
     temp_coherence_loss = (state_diff_norm ** 2).mean()
     causality_loss = similarity(states[dissimilar_pairs[:, 0]],
                                 states[dissimilar_pairs[:, 1]]).mean()
@@ -177,7 +177,6 @@ def rewardModelLoss(rewards_pred, rewards_st, weight, loss_manager, label_weight
     loss_manager.addToLosses('reward_loss', weight, reward_loss)
     return weight * reward_loss
 
-
 def reconstructionLoss(input_image, target_image):
     """
     Reconstruction Loss for Autoencoders
@@ -224,7 +223,7 @@ def generationLoss(decoded, next_decoded, obs, next_obs, weight, loss_manager):
 
 
 def perceptualSimilarityLoss(encoded_real, encoded_prediction, next_encoded_real, next_encoded_prediction,
-                             weight, loss_manager):
+                            weight, loss_manager):
     """
     Perceptual similarity Loss for VAE as in
     # "DARLA: Improving Zero-Shot Transfer in Reinforcement Learning", Higgins et al.
@@ -263,6 +262,23 @@ def kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager, beta=1):
     kl_divergence += -0.5 * th.sum(1 + next_logvar - next_mu.pow(2) - next_logvar.exp())
     loss_manager.addToLosses('kl_loss', beta, kl_divergence)
     return beta * kl_divergence
+
+
+def kullbackLeiblerLossCCI(mu, next_mu, logvar, next_logvar, c, gamma, loss_manager):
+    """
+    KL divergence losses summed over all elements and batch
+    :param mu: mean of the distribution of samples (th.Tensor)
+    :param next_mu: mean of the distribution of next samples (th.Tensor)
+    :param logvar: log of the variance of the distribution of samples (th.Tensor)
+    :param next_logvar: log of the variance of the distribution of next samples (th.Tensor)
+    :param loss_manager: loss criterion needed to log the loss value (LossManager)
+    :param gamma: (float)
+    :param c: (float)
+    """
+    kl_divergence = -0.5 * th.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    kl_divergence += -0.5 * th.sum(1 + next_logvar - next_mu.pow(2) - next_logvar.exp())
+    loss_manager.addToLosses('kl_loss with cci', gamma, abs(kl_divergence-c))
+    return gamma*abs(kl_divergence-c)
 
 
 def mutualInformationLoss(states, rewards_st, weight, loss_manager):
