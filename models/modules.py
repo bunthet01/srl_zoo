@@ -19,7 +19,7 @@ except:
 
 
 class SRLModules(BaseForwardModel, BaseInverseModel, BaseRewardModel):
-    def __init__(self, state_dim=2, img_shape=None, action_dim=6, model_type="custom_cnn", losses=None,
+    def __init__(self, state_dim=2, cuda=False, img_shape=None, action_dim=6, model_type="custom_cnn", losses=None,
                  split_dimensions=None, n_hidden_reward=16, inverse_model_type="linear"):
         """
         A model that can combine AE/VAE + Inverse + Forward + Reward models

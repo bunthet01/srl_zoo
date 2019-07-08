@@ -132,6 +132,7 @@ if __name__ == '__main__':
         img_shape = None  # (3,224,224)
     else:
         img_shape = tuple(map(int, args.img_shape[1:-1].split(",")))
+        print("img_shape", img_shape)
     if args.multi_view is True:
         # Setting variables involved data-loading from multiple cameras,
         # involved also in adapting the input layers of NN to that data

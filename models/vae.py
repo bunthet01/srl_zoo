@@ -63,6 +63,7 @@ class CNNVAE(BaseModelVAE):
         super(CNNVAE, self).__init__(state_dim=state_dim, img_shape=img_shape)
         outshape = summary(self.encoder_conv, img_shape, show=False)  # [-1, channels, high, width]
         self.img_height, self.img_width = outshape[-2:]
+
         self.encoder_fc1 = nn.Linear(self.img_height * self.img_width * 64, state_dim)
         self.encoder_fc2 = nn.Linear(self.img_height * self.img_width * 64, state_dim)
 

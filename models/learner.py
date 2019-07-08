@@ -1,3 +1,4 @@
+
 from __future__ import print_function, division, absolute_import
 
 import os
@@ -48,16 +49,14 @@ class BaseLearner(object):
     Base class for a method that learn a state representation
     from observations
     :param state_dim: (int)
-    :param class_dim: (int)
     :param batch_size: (int)
     :param seed: (int)
     :param cuda: (int) (default -1, CPU) equi to CUDA_VISIBLE_DEVICES
     """
 
-    def __init__(self, state_dim, class_dim, batch_size, seed=1, cuda=-1):
+    def __init__(self, state_dim, batch_size, seed=1, cuda=-1):
         super(BaseLearner, self).__init__()
         self.state_dim = state_dim
-        self.class_dim = class_dim
         self.batch_size = batch_size
         self.module = None
         self.seed = seed
@@ -737,7 +736,14 @@ class SRL4robotics(BaseLearner):
                             if obs[0].shape[0] == 3:  # RGB
                                 reconstruct_obs = self.module.model.reconstruct(obs)
                                 # , normalize=True, range=(0,1)
-                                images = make_grid([obs[0], reconstruct_obs[0], obs[1], reconstruct_obs[1]], nrow=2)
+                                print(obs[0].size())
+                                # print(obs[1].size())
+                                print(reconstruct_obs[0].size())
+                               
+                                # print(reconstruct_obs[1].size())
+                               
+                               
+                                images = make_grid([obs[0], reconstruct_obs[0]], nrow=2)
                                 plotImage(deNormalize(detachToNumpy(images)), mode='cv2',
                                           save2dir=figdir_recon, index=epoch+1)
                                 # if self.use_dae:
