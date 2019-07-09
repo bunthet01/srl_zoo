@@ -65,7 +65,7 @@ class LossManager:
 
 
 def roboticPriorsLoss(states, next_states, minibatch_idx,
-                      dissimilar_pairs, same_actions_pairs, weight, loss_manager):
+            dissimilar_pairs, same_actions_pairs, weight, loss_manager):
     """
     Computing the 4 Robotic priors: Temporal coherence, Causality, Proportionality, Repeatability
     :param states: (th.Tensor)
@@ -91,8 +91,7 @@ def roboticPriorsLoss(states, next_states, minibatch_idx,
 
     repeatability_loss = (
         similarity(states[same_actions_pairs[:, 0]], states[same_actions_pairs[:, 1]]) *
-        (state_diff[same_actions_pairs[:, 0]] - state_diff[same_actions_pairs[:, 1]]).norm(2,
-                                                                                           dim=1) ** 2).mean()
+        (state_diff[same_actions_pairs[:, 0]] - state_diff[same_actions_pairs[:, 1]]).norm(2, dim=1) ** 2).mean()
     weights = [1, 1, 1, 1]
     names = ['temp_coherence_loss', 'causality_loss', 'proportionality_loss', 'repeatability_loss']
     losses = [temp_coherence_loss, causality_loss, proportionality_loss, repeatability_loss]
@@ -399,7 +398,6 @@ def tripletLoss(states, p_states, n_states, weight, loss_manager, alpha=0.2):
     tcn_triplet_loss = tcn_triplet_loss.mean()
     loss_manager.addToLosses('triplet_loss', weight, tcn_triplet_loss)
     return weight * tcn_triplet_loss
-
 
 def ganNonSaturateLoss(img_rating, label, weight, loss_manager, name="non_saturate_loss"):
     binary_crossentropy = th.nn.BCELoss()(img_rating, label)
