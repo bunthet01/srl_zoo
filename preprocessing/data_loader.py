@@ -214,7 +214,7 @@ class DataLoader(object):
         :return: (th.Tensor)
         """
         # Remove trailing .jpg if present
-        image_path = 'data/' + image_path.split('.jpg')[0]
+        image_path = 'srl_zoo/data/' + image_path.split('.jpg')[0]
 
         if multi_view:
             images = []
@@ -460,11 +460,13 @@ class RobotEnvDataset(torch.utils.data.Dataset):
                 img = self._get_one_img(image_path)
                 img_next = self._get_one_img(self.images_path[index+1])
                 action = self.actions[index]
+                next_action = self.actions[index+1]
                 reward = self.rewards[index]
-                return index, img.astype(self.dtype), img_next.astype(self.dtype), action, reward, 1, 1
+                return index, img.astype(self.dtype), img_next.astype(self.dtype), action, next_action, reward, 1, 1
             else:
                 img = self._get_one_img(image_path)
-                return img.astype(self.dtype)
+                action = self.actions[index]
+                return img.astype(self.dtype), action
 
         else:  # [TODO: not tested yet]
             raise NotImplementedError

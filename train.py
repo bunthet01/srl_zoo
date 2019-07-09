@@ -61,7 +61,7 @@ if __name__ == '__main__':
                         help='Force balanced sampling for episode independent prior instead of uniform')
     parser.add_argument('--losses', nargs='+', default=[], **parseLossArguments(
         choices=["forward", "inverse", "reward", "priors", "episode-prior", "reward-prior", "triplet",
-                 "autoencoder", "vae", "perceptual", "dae", "random"],
+                 "autoencoder", "vae","cvae" "perceptual", "dae", "random"],
         help='The wanted losses. One may also want to specify a weight and dimension '
              'that apply as follows: "<name>:<weight>:<dimension>".'))
     parser.add_argument('--beta', type=float, default=1.0,
@@ -154,6 +154,7 @@ if __name__ == '__main__':
         "To use the perceptual loss with a VAE, please specify a path to a pre-trained DAE model"
     assert not ("dae" in losses and "perceptual" in losses), \
         "Please learn the DAE before learning a VAE with the perceptual loss "
+    assert not ("cvae" in losses and len(losses) > 1), "cvae cannot used with other losses"
 
     print('Loading data ... ')
 
@@ -192,15 +193,16 @@ if __name__ == '__main__':
     print('Log folder: {}'.format(args.log_folder))
 
     print('Learning a state representation ... ')
+    # The dimension of the class (action) in CVAE
+    class_dim = 4
+    exp_config['class_dim'] = class_dim
 
-    srl = SRL4robotics(args.state_dim, img_shape=img_shape, model_type=args.model_type, inverse_model_type=args.inverse_model_type,
-                       seed=args.seed,
-                       log_folder=args.log_folder, learning_rate=args.learning_rate, learning_rate_gan=(
-                           args.learning_rate_D, args.learning_rate_G),
-                       l1_reg=args.l1_reg, l2_reg=args.l2_reg, cuda=args.gpu_num, multi_view=args.multi_view,
-                       losses=losses, losses_weights_dict=losses_weights_dict, n_actions=n_actions, beta=args.beta,
-                       split_dimensions=split_dimensions, path_to_dae=args.path_to_dae,
-                       state_dim_dae=args.state_dim_dae, occlusion_percentage=args.occlusion_percentage, pretrained_weights_path=args.srl_pre_weights)
+    srl = SRL4robotics(args.state_dim, class_dim, img_shape=img_shape, model_type=args.model_type, inverse_model_type=args.inverse_model_type,
+                       seed=args.seed,log_folder=args.log_folder, learning_rate=args.learning_rate, learning_rate_gan=( args.learning_rate_D,
+                        args.learning_rate_G),l1_reg=args.l1_reg, l2_reg=args.l2_reg, cuda=args.gpu_num, multi_view=args.multi_view,losses=losses,
+                        losses_weights_dict=losses_weights_dict, n_actions=n_actions, beta=args.beta,
+                        split_dimensions=split_dimensions, path_to_dae=args.path_to_dae, state_dim_dae=args.state_dim_dae, 
+                        occlusion_percentage=args.occlusion_percentage, pretrained_weights_path=args.srl_pre_weights)
 
     if args.training_set_size > 0:
         limit = args.training_set_size

@@ -54,9 +54,10 @@ class BaseLearner(object):
     :param cuda: (int) (default -1, CPU) equi to CUDA_VISIBLE_DEVICES
     """
 
-    def __init__(self, state_dim, batch_size, seed=1, cuda=-1):
+    def __init__(self, state_dim, class_dim, batch_size, seed=1, cuda=-1):
         super(BaseLearner, self).__init__()
         self.state_dim = state_dim
+        self.class_dim = class_dim
         self.batch_size = batch_size
         self.module = None
         self.seed = seed
@@ -159,12 +160,12 @@ class SRL4robotics(BaseLearner):
     :param pretrained_weights_path: SRL pretrained model weights path (default: None)
     """
 
-    def __init__(self, state_dim, img_shape=None, model_type="resnet", inverse_model_type="linear", log_folder="logs/default",
+    def __init__(self, state_dim, class_dim, img_shape=None, model_type="resnet", inverse_model_type="linear", log_folder="logs/default",
                  seed=1, learning_rate=0.001, learning_rate_gan=(0.001, 0.001), l1_reg=0.0, l2_reg=0.0, cuda=-1,
                  multi_view=False, losses=None, losses_weights_dict=None, n_actions=6, beta=1,
                  split_dimensions=-1, path_to_dae=None, state_dim_dae=200, occlusion_percentage=None, pretrained_weights_path=None):
 
-        super(SRL4robotics, self).__init__(state_dim, BATCH_SIZE, seed, cuda)
+        super(SRL4robotics, self).__init__(state_dim, class_dim, BATCH_SIZE, seed, cuda)
 
         self.multi_view = multi_view
         self.losses = losses
@@ -184,6 +185,7 @@ class SRL4robotics(BaseLearner):
             self.reward_prior = "reward-prior" in losses
             self.use_autoencoder = "autoencoder" in losses
             self.use_vae = "vae" in losses
+            self.use_cvae = "cvae" in losses
             self.use_triplets = "triplet" in self.losses
             self.perceptual_similarity_loss = "perceptual" in self.losses
             self.use_dae = "dae" in self.losses
@@ -195,7 +197,7 @@ class SRL4robotics(BaseLearner):
                 self.split_dimensions = split_dimensions  # TODO UGLY!
             else:
                 self.use_split = False
-            self.module = SRLModules(state_dim=self.state_dim, img_shape=self.img_shape, action_dim=self.dim_action, model_type=model_type,
+            self.module = SRLModules(state_dim=self.state_dim, class_dim = self.class_dim, img_shape=self.img_shape, action_dim=self.dim_action, model_type=model_type,
                                      losses=losses, split_dimensions=split_dimensions, inverse_model_type=inverse_model_type)
         else:
             raise ValueError("Unknown model: {}".format(model_type))
@@ -446,7 +448,7 @@ class SRL4robotics(BaseLearner):
                     self.module.train()
                 dataloader = infinite_dataloader(dataloader)  # iter(dataloader)
                 for iter_ind in range(n_batch_per_epoch):
-                    (sample_idx, obs, next_obs, action, reward, noisy_obs, next_noisy_obs) = next(dataloader)
+                    (sample_idx, obs, next_obs, action, next_action reward, noisy_obs, next_noisy_obs) = next(dataloader)
                     obs, next_obs = obs.to(self.device), next_obs.to(self.device)
 
                     # if self.use_dae:

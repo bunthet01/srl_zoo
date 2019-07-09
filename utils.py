@@ -97,16 +97,16 @@ def loadData(data_folder):
     :param data_folder: (str) path to the data_folder to be loaded
     :return: (Numpy dictionary-like objects and np.ndarrays)
     """
-    training_data = np.load('data/{}/preprocessed_data.npz'.format(data_folder))
+    training_data = np.load('{}/preprocessed_data.npz'.format(data_folder))
     episode_starts = training_data['episode_starts']
 
-    ground_truth = np.load('data/{}/ground_truth.npz'.format(data_folder))
+    ground_truth = np.load('{}/ground_truth.npz'.format(data_folder))
     # Backward compatibility with previous names
     true_states = ground_truth['ground_truth_states' if 'ground_truth_states' in ground_truth.keys() else 'arm_states']
     target_positions = \
         ground_truth['target_positions' if 'target_positions' in ground_truth.keys() else 'button_positions']
 
-    with open('data/{}/dataset_config.json'.format(data_folder), 'r') as f:
+    with open('{}/dataset_config.json'.format(data_folder), 'r') as f:
         relative_pos = json.load(f).get('relative_pos', False)
 
     target_pos_ = []
