@@ -96,7 +96,7 @@ class BaseLearner(object):
         predictions = []
         for batch in data_loader:
             obs = batch[0].to(self.device)
-            action = batch[1].to(self.device)
+            action = convertScalerToVectorAction(batch[1]).to(self.device)
             predictions.append(self._predFn(obs, action, self.use_cvae))
 
         return np.concatenate(predictions, axis=0)
