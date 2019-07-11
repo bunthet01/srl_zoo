@@ -18,11 +18,11 @@ from tqdm import tqdm
 
 from losses.losses import LossManager, autoEncoderLoss, roboticPriorsLoss, tripletLoss, rewardModelLoss, \
     rewardPriorLoss, forwardModelLoss, inverseModelLoss, episodePriorLoss, l1Loss, l2Loss, kullbackLeiblerLoss, \
-    kullbackLeiblerLossCCI, perceptualSimilarityLoss, generationLoss, ganNonSaturateLoss
+    kullbackLeiblerLossCCI, generationLoss, ganNonSaturateLoss
 from losses.utils import findPriorsPairs
 from pipeline import NAN_ERROR
 from plotting.representation_plot import plotRepresentation, plotImage, printGTC
-from preprocessing.data_loader import DataLoader, convertScalerToVectorAction, RobotEnvDataset
+from preprocessing.data_loader import convertScalerToVectorAction, RobotEnvDataset
 from preprocessing.utils import deNormalize
 from utils import printRed, detachToNumpy, printYellow
 from .modules import SRLModules
@@ -54,7 +54,7 @@ class BaseLearner(object):
     :param cuda: (int) (default -1, CPU) equi to CUDA_VISIBLE_DEVICES
     """
 
-    def __init__(self, state_dim, class_dim, batch_size, seed=1, cuda=-1):
+    def __init__(self, state_dim, class_dim, batch_size, seed=1, cuda=-1, use_cvae=False):
         super(BaseLearner, self).__init__()
         self.state_dim = state_dim
         self.class_dim = class_dim
@@ -62,6 +62,7 @@ class BaseLearner(object):
         self.module = None
         self.seed = seed
         self.use_dae = False
+        self.use_cvae = use_cvae
         assert not self.use_dae, "Not implemented error."
         # Seed the random generator
         np.random.seed(seed)
@@ -71,10 +72,9 @@ class BaseLearner(object):
             torch.backends.cudnn.deterministic = True
             torch.cuda.manual_seed(seed)
 
-        self.device = torch.device(
-            "cuda:{}".format(cuda) if torch.cuda.is_available() and (cuda >= 0) else "cpu")
+        self.device = torch.device("cuda:{}".format(cuda) if torch.cuda.is_available() and (cuda >= 0) else "cpu")
 
-    def _predFn(self, observations):
+    def _predFn(self, observations, action, use_cvae):
         """
         Predict states in test mode given observations
 
@@ -82,7 +82,10 @@ class BaseLearner(object):
         :return: (np.ndarray)
         """
         # Move the tensor back to the cpu
-        return detachToNumpy(self.module.model(observations))
+        if use_cvae:
+            return detachToNumpy(self.module.model(observations, action))
+        else:
+            return detachToNumpy(self.module.model(observations))
 
     def predStatesWithDataLoader(self, data_loader):
         """
@@ -91,9 +94,10 @@ class BaseLearner(object):
         :return: (np.ndarray)
         """
         predictions = []
-        for obs_var in data_loader:
-            obs_var = obs_var.to(self.device)
-            predictions.append(self._predFn(obs_var))
+        for batch in data_loader:
+            obs = batch[0].to(self.device)
+            action = convertScalerToVectorAction(batch[1]).to(self.device)
+            predictions.append(self._predFn(obs, action, self.use_cvae))
 
         return np.concatenate(predictions, axis=0)
 
@@ -161,11 +165,11 @@ class SRL4robotics(BaseLearner):
     """
 
     def __init__(self, state_dim, class_dim, img_shape=None, model_type="resnet", inverse_model_type="linear", log_folder="logs/default",
-                 seed=1, learning_rate=0.001, learning_rate_gan=(0.001, 0.001), l1_reg=0.0, l2_reg=0.0, cuda=-1,
+                 seed=1, learning_rate=0.005, learning_rate_gan=(0.001, 0.001), l1_reg=0.0, l2_reg=0.0, cuda=-1,
                  multi_view=False, losses=None, losses_weights_dict=None, n_actions=6, beta=1,
                  split_dimensions=-1, path_to_dae=None, state_dim_dae=200, occlusion_percentage=None, pretrained_weights_path=None):
 
-        super(SRL4robotics, self).__init__(state_dim, class_dim, BATCH_SIZE, seed, cuda)
+        super(SRL4robotics, self).__init__(state_dim, class_dim, BATCH_SIZE, seed, cuda, use_cvae="cvae" in losses)
 
         self.multi_view = multi_view
         self.losses = losses
@@ -187,7 +191,7 @@ class SRL4robotics(BaseLearner):
             self.use_vae = "vae" in losses
             self.use_cvae = "cvae" in losses
             self.use_triplets = "triplet" in self.losses
-            self.perceptual_similarity_loss = "perceptual" in self.losses
+            # self.perceptual_similarity_loss = "perceptual" in self.losses
             self.use_dae = "dae" in self.losses
             self.path_to_dae = path_to_dae
 
@@ -237,7 +241,7 @@ class SRL4robotics(BaseLearner):
         # Default weights that are updated with the weights passed to the script
         self.losses_weights_dict = {"forward": 1.0, "inverse": 2.0, "reward": 1.0, "priors": 1.0,
                                     "episode-prior": 1.0, "reward-prior": 10, "triplet": 1.0,
-                                    "autoencoder": 1.0, "vae": 0.5e-6, "perceptual": 1e-6, "dae": 1.0,
+                                    "autoencoder": 1.0, "vae": 1.0, "cvae": 1.0, "perceptual": 1e-6, "dae": 1.0,
                                     'l1_reg': l1_reg, "l2_reg": l2_reg, 'random': 1.0}
         self.occlusion_percentage = occlusion_percentage
         self.state_dim_dae = state_dim_dae
@@ -271,6 +275,7 @@ class SRL4robotics(BaseLearner):
             exp_config = json.load(f, object_pairs_hook=OrderedDict)
 
         state_dim = exp_config['state-dim']
+        class_dim = exp_config['class_dim']
         losses = exp_config['losses']
         n_actions = exp_config['n_actions']
         model_type = exp_config['model-type']
@@ -285,7 +290,7 @@ class SRL4robotics(BaseLearner):
         # HACK: TODO include GAN to the losses and add it to valid_models of ./srl_zoo/evaluation/enjoy_latent.py
         # assert set(losses).intersection(valid_models) != set(), "Error: Not supported losses " + ", ".join(difference)
 
-        srl_model = SRL4robotics(state_dim, img_shape=img_shape, model_type=model_type, cuda=cuda, multi_view=multi_view,
+        srl_model = SRL4robotics(state_dim, class_dim, img_shape=img_shape, model_type=model_type, cuda=cuda, multi_view=multi_view,
                                  losses=losses, n_actions=n_actions, split_dimensions=split_dimensions,
                                  inverse_model_type=inverse_model_type, occlusion_percentage=occlusion_percentage)
         srl_model.module.load_state_dict(torch.load(model_path))
@@ -448,7 +453,7 @@ class SRL4robotics(BaseLearner):
                     self.module.train()
                 dataloader = infinite_dataloader(dataloader)  # iter(dataloader)
                 for iter_ind in range(n_batch_per_epoch):
-                    (sample_idx, obs, next_obs, action, next_action reward, noisy_obs, next_noisy_obs) = next(dataloader)
+                    (sample_idx, obs, next_obs, action, next_action, reward, noisy_obs, next_noisy_obs) = next(dataloader)
                     obs, next_obs = obs.to(self.device), next_obs.to(self.device)
 
                     # if self.use_dae:
@@ -660,8 +665,13 @@ class SRL4robotics(BaseLearner):
                     else:  # ============= Main update ====================
 
                         # Compute weighted average of losses of encoder part (including 'forward'/'inverse'/'reward' models)
-                        loss = self.module.model.train_on_batch(
-                            obs, next_obs, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
+                        if self.use_cvae:
+                            action = convertScalerToVectorAction(action).to(self.device)
+                            next_action = convertScalerToVectorAction(next_action).to(self.device)
+
+                            loss = self.module.model.train_on_batch(obs, next_obs, action, next_action, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
+                        else:
+                            loss = self.module.model.train_on_batch(obs, next_obs, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
                         # Loss: accumulate scalar loss
                         epoch_loss += loss
                         epoch_batches += 1
@@ -733,30 +743,33 @@ class SRL4robotics(BaseLearner):
                                            name="Learned State Representation (Training Data)",
                                            path=os.path.join(figdir_repr, "Epoch_{}.png".format(epoch+1)))
                         printGTC(state_pred, ground_truth, target_positions)
-                        if self.use_autoencoder or self.use_vae or self.use_dae or self.model_type == "unet":  # or self.model_type == 'gan'
+                        if self.use_autoencoder or self.use_vae or self.use_cvae or self.use_dae or self.model_type == "unet":  # or self.model_type == 'gan'
                             # Plot Reconstructed Image
                             if obs[0].shape[0] == 3:  # RGB
-                                reconstruct_obs = self.module.model.reconstruct(obs)
+                                if self.use_cvae:
+                                    reconstruct_obs = self.module.model.reconstruct(obs, action)
+                                else:
+                                    reconstruct_obs = self.module.model.reconstruct(obs)
                                 # , normalize=True, range=(0,1)
                                 print(obs[0].size())
-                                # print(obs[1].size())
+                                print(obs[1].size())
                                 print(reconstruct_obs[0].size())
                                
-                                # print(reconstruct_obs[1].size())
+                                print(reconstruct_obs[1].size())
                                
                                
-                                images = make_grid([obs[0], reconstruct_obs[0]], nrow=2)
+                                images = make_grid([obs[0], reconstruct_obs[0],obs[1], reconstruct_obs[1]], nrow=2)
                                 plotImage(deNormalize(detachToNumpy(images)), mode='cv2',
                                           save2dir=figdir_recon, index=epoch+1)
                                 # if self.use_dae:
                                 #     raise NotImplementedError
                                 #     plotImage(deNormalize(detachToNumpy(noisy_obs[0])), "Noisy Input Image (Train)")
-                                if self.perceptual_similarity_loss:
-                                    raise NotImplementedError
-                                    plotImage(deNormalize(detachToNumpy(decoded_obs_denoiser[0])),
-                                              "Reconstructed Image DAE")
-                                    plotImage(deNormalize(detachToNumpy(decoded_obs_denoiser_predicted[0])),
-                                              "Reconstructed Image predicted DAE")
+                                # if self.perceptual_similarity_loss:
+                                #     raise NotImplementedError
+                                #     plotImage(deNormalize(detachToNumpy(decoded_obs_denoiser[0])),
+                                #               "Reconstructed Image DAE")
+                                #     plotImage(deNormalize(detachToNumpy(decoded_obs_denoiser_predicted[0])),
+                                #               "Reconstructed Image predicted DAE")
 
                             elif obs[0].shape[0] % 3 == 0:  # Multi-RGB
                                 raise NotImplementedError
@@ -766,13 +779,13 @@ class SRL4robotics(BaseLearner):
                                     # if self.use_dae:
                                     #     plotImage(deNormalize(detachToNumpy(noisy_obs[0][k * 3:(k + 1) * 3, :, :])),
                                     #               "Noisy Input Image (Train)".format(k + 1))
-                                    if self.perceptual_similarity_loss:
-                                        plotImage(deNormalize(
-                                            detachToNumpy(decoded_obs_denoiser[0][k * 3:(k + 1) * 3, :, :])),
-                                            "Reconstructed Image DAE")
-                                        plotImage(deNormalize(
-                                            detachToNumpy(decoded_obs_denoiser_predicted[0][k * 3:(k + 1) * 3, :, :])),
-                                            "Reconstructed Image predicted DAE")
+                                    # if self.perceptual_similarity_loss:
+                                    #     plotImage(deNormalize(
+                                    #         detachToNumpy(decoded_obs_denoiser[0][k * 3:(k + 1) * 3, :, :])),
+                                    #         "Reconstructed Image DAE")
+                                    #     plotImage(deNormalize(
+                                    #         detachToNumpy(decoded_obs_denoiser_predicted[0][k * 3:(k + 1) * 3, :, :])),
+                                    #         "Reconstructed Image predicted DAE")
                                     plotImage(deNormalize(detachToNumpy(reconstruct_obs[0][k * 3:(k + 1) * 3, :, :])),
                                               "Reconstructed Image {}".format(k + 1))
 

@@ -61,7 +61,7 @@ if __name__ == '__main__':
                         help='Force balanced sampling for episode independent prior instead of uniform')
     parser.add_argument('--losses', nargs='+', default=[], **parseLossArguments(
         choices=["forward", "inverse", "reward", "priors", "episode-prior", "reward-prior", "triplet",
-                 "autoencoder", "vae","cvae" "perceptual", "dae", "random"],
+                 "autoencoder", "vae","cvae", "perceptual", "dae", "random"],
         help='The wanted losses. One may also want to specify a weight and dimension '
              'that apply as follows: "<name>:<weight>:<dimension>".'))
     parser.add_argument('--beta', type=float, default=1.0,
@@ -132,7 +132,6 @@ if __name__ == '__main__':
         img_shape = None  # (3,224,224)
     else:
         img_shape = tuple(map(int, args.img_shape[1:-1].split(",")))
-        print("img_shape", img_shape)
     if args.multi_view is True:
         # Setting variables involved data-loading from multiple cameras,
         # involved also in adapting the input layers of NN to that data
@@ -187,6 +186,7 @@ if __name__ == '__main__':
     exp_config['experiment-name'] = experiment_name
     exp_config['n_actions'] = n_actions
     exp_config['multi-view'] = args.multi_view
+    exp_config['img_shape'] = args.img_shape
 
     if "dae" in losses:
         exp_config['occlusion-percentage'] = args.occlusion_percentage
