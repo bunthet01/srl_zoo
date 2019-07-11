@@ -82,7 +82,7 @@ def roboticPriorsLoss(states, next_states, minibatch_idx,
 
     state_diff = next_states - states
     state_diff_norm = state_diff.norm(2, dim=1)
-    similarity = lambda x, y: th.exp(-(x - y).norm(2, dim=1) ** 2)
+    def similarity(x, y): return th.exp(-(x - y).norm(2, dim=1) ** 2)
     temp_coherence_loss = (state_diff_norm ** 2).mean()
     causality_loss = similarity(states[dissimilar_pairs[:, 0]],
                                 states[dissimilar_pairs[:, 1]]).mean()

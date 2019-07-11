@@ -96,7 +96,7 @@ class BaseLearner(object):
         predictions = []
         for batch in data_loader:
             obs = batch[0].to(self.device)
-            action = convertScalerToVectorAction(batch[1]).to(self.device)
+            action = batch[1].to(self.device)
             predictions.append(self._predFn(obs, action, self.use_cvae))
 
         return np.concatenate(predictions, axis=0)
@@ -165,7 +165,7 @@ class SRL4robotics(BaseLearner):
     """
 
     def __init__(self, state_dim, class_dim, img_shape=None, model_type="resnet", inverse_model_type="linear", log_folder="logs/default",
-                 seed=1, learning_rate=0.005, learning_rate_gan=(0.001, 0.001), l1_reg=0.0, l2_reg=0.0, cuda=-1,
+                 seed=1, learning_rate=0.001, learning_rate_gan=(0.001, 0.001), l1_reg=0.0, l2_reg=0.0, cuda=-1,
                  multi_view=False, losses=None, losses_weights_dict=None, n_actions=6, beta=1,
                  split_dimensions=-1, path_to_dae=None, state_dim_dae=200, occlusion_percentage=None, pretrained_weights_path=None):
 
@@ -666,10 +666,10 @@ class SRL4robotics(BaseLearner):
 
                         # Compute weighted average of losses of encoder part (including 'forward'/'inverse'/'reward' models)
                         if self.use_cvae:
-                            action = convertScalerToVectorAction(action).to(self.device)
-                            next_action = convertScalerToVectorAction(next_action).to(self.device)
+                            action_cvae = convertScalerToVectorAction(action).to(self.device)
+                            next_action_cvae = convertScalerToVectorAction(next_action).to(self.device)
 
-                            loss = self.module.model.train_on_batch(obs, next_obs, action, next_action, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
+                            loss = self.module.model.train_on_batch(obs, next_obs, action_cvae, next_action_cvae, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
                         else:
                             loss = self.module.model.train_on_batch(obs, next_obs, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
                         # Loss: accumulate scalar loss
@@ -747,7 +747,7 @@ class SRL4robotics(BaseLearner):
                             # Plot Reconstructed Image
                             if obs[0].shape[0] == 3:  # RGB
                                 if self.use_cvae:
-                                    reconstruct_obs = self.module.model.reconstruct(obs, action)
+                                    reconstruct_obs = self.module.model.reconstruct(obs, action_cvae)
                                 else:
                                     reconstruct_obs = self.module.model.reconstruct(obs)
                                 # , normalize=True, range=(0,1)

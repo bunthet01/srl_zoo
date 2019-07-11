@@ -77,7 +77,7 @@ if __name__ == '__main__':
     parser.add_argument('--monitor', type=str, default='loss',
                         choices=['pbar', 'loss'],
                         help="Monitor mode: either print the losses ('loss') or show the progressbar ('pbar'). (default 'loss')")
-    parser.add_argument('--num-worker', type=int, default=4,
+    parser.add_argument('--num-worker', type=int, default=10,
                         help="Number of CPUs to use for dataloader.")
     parser.add_argument('--srl-pre-weights', type=str, default=None,
                         help="Load SRL pretrained weights.")
