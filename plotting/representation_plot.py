@@ -328,11 +328,12 @@ def plotCorrelation(states_rewards, ground_truth, target_positions, only_print=T
     return gtc, np.mean(gtc)
 
 
-def printGTC(states_pred, ground_truth, target_positions):
+def printGTC(states_pred, ground_truth, target_positions, truncate=None):
     np.set_printoptions(precision=3)
-    gt_pos = ground_truth['ground_truth_states']  # 'arm_states'
+    gt_pos = ground_truth['ground_truth_states'][:truncate] if truncate is not None else ground_truth['ground_truth_states']  # 'arm_states'
     gtc = []
-    for gt_states in [gt_pos, target_positions]:
+    new_target_positions = target_positions[:truncate] if truncate is not None else target_positions
+    for gt_states in [gt_pos, new_target_positions]:
         gtc.append(compute_GTC(states_pred, gt_states))
     gtc = np.hstack(gtc)
     print("GTC: {}".format(gtc))

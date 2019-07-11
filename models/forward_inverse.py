@@ -46,7 +46,7 @@ class BaseInverseModel(BaseModelSRL):
         :return: (torch.Tensor)
         """
         if model_type == "linear":
-            self.inverse_net = nn.Linear(state_dim * 2, action_dim)
+            self.inverse_net = nn.Linear(state_dim, action_dim)
         elif model_type == "mlp":
             self.inverse_net = nn.Sequential(nn.Linear(state_dim * 2, n_hidden),
                                              nn.ReLU(),
@@ -68,7 +68,7 @@ class BaseInverseModel(BaseModelSRL):
         :return: probability of each action
         """
         # input: concatenation of state & next state over the 2nd dimension
-        return self.inverse_net(torch.cat((state, next_state), dim=1))
+        return self.inverse_net(next_state-state)
 
 
 class BaseRewardModel(BaseModelSRL):
@@ -77,12 +77,11 @@ class BaseRewardModel(BaseModelSRL):
         super(BaseRewardModel, self).__init__()
 
     def initRewardNet(self, state_dim, n_rewards=2, n_hidden=16):
-        self.reward_net = nn.Sequential(nn.Linear(2 * state_dim, n_hidden),
-                                        nn.ReLU(),
+        self.reward_net = nn.Sequential(nn.Linear(2*state_dim, n_hidden),
+                                        nn.LeakyReLU(negative_slope=0.1),
                                         nn.Linear(n_hidden, n_hidden),
-                                        nn.ReLU(),
+                                        nn.LeakyReLU(negative_slope=0.1),
                                         nn.Linear(n_hidden, n_rewards))
-
     def forward(self, x):
         raise NotImplementedError()
 
@@ -95,6 +94,52 @@ class BaseRewardModel(BaseModelSRL):
         """
         return self.reward_net(torch.cat((state, next_state), dim=1))
 
+        
+
+
+class BaseRewardModel2(BaseModelSRL):
+    def __init__(self):
+        self.reward_net2 = None
+        super(BaseRewardModel2, self).__init__()
+
+    def initRewardNet2(self, state_dim, n_rewards=2, n_hidden=16):
+        self.reward_net2 = nn.Sequential(nn.Linear(state_dim, n_hidden),
+                                        nn.LeakyReLU(negative_slope=0.1),
+                                        nn.Linear(n_hidden, n_hidden),
+                                        nn.LeakyReLU(negative_slope=0.1),
+                                        nn.Linear(n_hidden, n_rewards))
+    def forward(self, x):
+        raise NotImplementedError()
+
+    def rewardModel2(self, state):
+        """
+        Predict reward given current state and next state
+        :param state: (torch.Tensor)
+        :return: (torch.Tensor)
+        """
+        return self.reward_net2(state)
+        # another idea
+        # concat = torch.cat((state, encodeOneHot(action, self.action_dim)), dim=1)
+        # return self.reward_net(concat)
+
+class SelfSupClassfier(BaseModelSRL):
+    def __init__(self, num_classes=100):
+        super(SelfSupClassfier, self).__init__()
+        self.classifier = None
+        self.num_classes = num_classes
+        
+    def initSpClsmodel(self, state_dim, n_hidden=100):
+        self.state_dim = state_dim
+        self.classifier = nn.Sequential(nn.Linear(self.state_dim, n_hidden),
+                                        nn.BatchNorm1d(n_hidden),
+                                        nn.LeakyReLU(negative_slope=0.1),
+                                        nn.Linear(n_hidden, n_hidden),
+                                        nn.BatchNorm1d(n_hidden),
+                                        nn.LeakyReLU(negative_slope=0.1),
+                                        nn.Linear(n_hidden, self.num_classes)
+                                        )
+    def forward(self, x):
+        raise NotImplementedError()
 
 class BasicTrainer(BaseTrainer):
     """

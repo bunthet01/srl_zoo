@@ -63,7 +63,6 @@ class CNNVAE(BaseModelVAE):
         super(CNNVAE, self).__init__(state_dim=state_dim, img_shape=img_shape)
         outshape = summary(self.encoder_conv, img_shape, show=False)  # [-1, channels, high, width]
         self.img_height, self.img_width = outshape[-2:]
-
         self.encoder_fc1 = nn.Linear(self.img_height * self.img_width * 64, state_dim)
         self.encoder_fc2 = nn.Linear(self.img_height * self.img_width * 64, state_dim)
 
@@ -111,7 +110,7 @@ class VAETrainer(nn.Module):
             self.model.compute_tensors(next_obs)
         # states, next_states = self.model(obs), self.model(next_obs)
         kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager=loss_manager, beta=beta)
-        generationLoss(decoded_obs, next_decoded_obs, obs, next_obs, weight=1.0, loss_manager=loss_manager)
+        generationLoss(decoded_obs, next_decoded_obs, obs, next_obs, weight=1.0, loss_manager=loss_manager) #0.5e-6
         loss_manager.updateLossHistory()
         loss = loss_manager.computeTotalLoss()
         if not valid_mode:
@@ -123,6 +122,9 @@ class VAETrainer(nn.Module):
         return loss
 
     def reconstruct(self, x):
+        """
+        This function is used for the visualization (testing/validation mode) only. Not for the training.
+        """
         return self.model.decode(self.model.encode(x)[0])
 
     def encode(self, x):
@@ -132,6 +134,9 @@ class VAETrainer(nn.Module):
         return self.model.decode(x)
 
     def forward(self, x):
+        """
+        All srl model should return the 'state' via 'forward' function.
+        """
         return self.model.encode(x)[0]  # or self.model(x)
 
 

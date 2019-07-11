@@ -176,6 +176,24 @@ def rewardModelLoss(rewards_pred, rewards_st, weight, loss_manager, label_weight
     loss_manager.addToLosses('reward_loss', weight, reward_loss)
     return weight * reward_loss
 
+
+def spclsLoss(cls_pred, cls_gt, weight, loss_manager):
+    """
+    Categorical Reward prediction Loss (Cross-entropy)
+    :param rewards_pred: predicted reward - categorical (th.Tensor)
+    :param rewards_st: (th.Tensor)
+    :param weight: coefficient to weight the loss
+    :param loss_manager: loss criterion needed to log the loss value (LossManager)
+    :param label_weights (torch tensor) specifies the loss weight for each label. (need to be a torch tensor)
+    :param ignore_index (int, optional) Specifies a target value that is ignored and does not 
+            contribute to the input gradient. 
+    :return:
+    """
+    loss_fn = nn.CrossEntropyLoss()
+    cls_loss = loss_fn(cls_pred, target=cls_gt)
+    loss_manager.addToLosses('spcls_loss', weight, cls_loss)
+    return weight * cls_loss
+
 def reconstructionLoss(input_image, target_image):
     """
     Reconstruction Loss for Autoencoders

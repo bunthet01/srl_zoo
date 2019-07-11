@@ -46,36 +46,36 @@ class BaseModelAutoEncoder(BaseModelSRL):
             # 224x224xN_CHANNELS -> 112x112x64
             nn.Conv2d(self.img_shape[0], 64, kernel_size=7, stride=2, padding=3, bias=False),
             nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 56x56x64
 
             conv3x3(in_planes=64, out_planes=64, stride=1),  # 56x56x64
             nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.MaxPool2d(kernel_size=3, stride=2),  # 27x27x64
 
             conv3x3(in_planes=64, out_planes=64, stride=2),  # 14x14x64
             nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.MaxPool2d(kernel_size=3, stride=2)  # 6x6x64
         )
 
         self.decoder_conv = nn.Sequential(
             nn.ConvTranspose2d(64, 64, kernel_size=3, stride=2),  # 13x13x64
             nn.BatchNorm2d(64),
-            nn.ReLU(True),
+            nn.ReLU(),
 
             nn.ConvTranspose2d(64, 64, kernel_size=3, stride=2),  # 27x27x64
             nn.BatchNorm2d(64),
-            nn.ReLU(True),
+            nn.ReLU(),
 
             nn.ConvTranspose2d(64, 64, kernel_size=3, stride=2),  # 55x55x64
             nn.BatchNorm2d(64),
-            nn.ReLU(True),
+            nn.ReLU(),
 
             nn.ConvTranspose2d(64, 64, kernel_size=3, stride=2),  # 111x111x64
             nn.BatchNorm2d(64),
-            nn.ReLU(True),
+            nn.ReLU(),
 
             nn.ConvTranspose2d(64, self.img_shape[0], kernel_size=4, stride=2),  # 224x224xN_CHANNELS
             nn.Tanh()
@@ -193,17 +193,17 @@ class CustomCNN(BaseModelSRL):
             # 224x224x3 -> 112x112x64
             nn.Conv2d(self.img_shape[0], 64, kernel_size=7, stride=2, padding=3, bias=False),
             nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 56x56x64
 
             conv3x3(in_planes=64, out_planes=64, stride=1),  # 56x56x64
             nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.MaxPool2d(kernel_size=3, stride=2),  # 27x27x64
 
             conv3x3(in_planes=64, out_planes=64, stride=2),  # 14x14x64
             nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
             nn.MaxPool2d(kernel_size=3, stride=2)  # 6x6x64
         )
 

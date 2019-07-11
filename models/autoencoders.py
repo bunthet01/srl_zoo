@@ -7,13 +7,15 @@ from torchsummary import summary
 try:
     # relative import: when executing as a package: python -m ...
     from .base_models import BaseModelAutoEncoder, ConvSN2d, ConvTransposeSN2d, LinearSN, UNet
-    from ..losses.losses import autoEncoderLoss
+    from ..losses.losses import autoEncoderLoss, AEboundLoss
     from .base_trainer import BaseTrainer
+    from .gan import GeneratorUnet, EncoderUnet
 except:
     # absolute import: when executing directly: python train.py ...
     from models.base_models import BaseModelAutoEncoder, ConvSN2d, ConvTransposeSN2d, LinearSN, UNet
-    from losses.losses import autoEncoderLoss
+    from losses.losses import autoEncoderLoss, AEboundLoss
     from models.base_trainer import BaseTrainer
+    from models.gan import GeneratorUnet, EncoderUnet
 
 
 class LinearAutoEncoder(BaseModelAutoEncoder):
@@ -268,8 +270,8 @@ class UNetAutoEncoder(BaseModelAutoEncoder):
 
     def __init__(self, state_dim=3, img_shape=(3, 224, 224)):
         super(UNetAutoEncoder, self).__init__(state_dim=state_dim, img_shape=img_shape)
-        self.decoder = UNetGenerator(img_shape, state_dim, unet_bn=True)
-        self.encoder = UNetEncoder(img_shape, state_dim, unet_bn=True)
+        self.decoder = GeneratorUnet(state_dim, img_shape, unet_bn=True)
+        self.encoder = EncoderUnet(state_dim, img_shape, unet_bn=True)
 
     def encode(self, x):
         """
@@ -307,9 +309,11 @@ class AutoEncoderTrainer(BaseTrainer):
             raise NotImplementedError("model type: ({}) not supported yet.".format(model_type))
 
     def train_on_batch(self, obs, next_obs, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu')):
-        decoded_obs = self.reconstruct(obs)
+        state_pred = self.encode(obs)
+        decoded_obs = self.decode(state_pred)
         decoded_next_obs = self.reconstruct(next_obs)
         autoEncoderLoss(obs, decoded_obs, next_obs, decoded_next_obs, weight=1.0, loss_manager=loss_manager)
+        AEboundLoss(state_pred, weight=1.0, loss_manager=loss_manager, name='bonud_state_loss', max_val=50)
         loss = self.update_nn_weights(optimizer, loss_manager, valid_mode=valid_mode)
         return loss
 
