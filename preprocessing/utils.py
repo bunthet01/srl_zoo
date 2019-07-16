@@ -1,6 +1,7 @@
 from __future__ import print_function, division
 
 import numpy as np
+import torch as th
 
 
 def preprocessInput(x, mode="tf"):
@@ -66,3 +67,25 @@ def deNormalize(x, mode="tf"):
         raise ValueError("Unknown mode for deNormalize")
     # Clip to fix numeric imprecision (1e-09 = 0)
     return np.clip(x, 0, 1)
+
+def convertScalerToTensorAction(x):
+    """
+    :param x: th.tensor() or np.ndarray() or list
+    :return: th.FloatTensor()
+    """
+    counter = 0
+    for i in x:
+        if i == 0:
+            l = np.array([1, 0, 0, 0])
+        elif i == 1:
+            l = np.array([0, 1, 0, 0])
+        elif i == 2:
+            l = np.array([0, 0, 1, 0])
+        else :
+            l = np.array([0, 0, 0, 1])
+        if counter == 0:
+            result = [l]
+        else:
+            result = np.append(result, [l], 0)
+        counter = counter+1
+    return th.FloatTensor(result)

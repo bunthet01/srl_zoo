@@ -209,6 +209,7 @@ class CustomCNN(BaseModelSRL):
 
         outshape = summary(self.conv_layers, img_shape, show=False)  # [-1, channels, high, width]
         self.img_height, self.img_width = outshape[-2:]
+
         self.fc = nn.Linear(self.img_height * self.img_width * 64, state_dim)
 
     def forward(self, x):

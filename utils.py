@@ -92,35 +92,44 @@ def buildConfig(args):
     return exp_config
 
 
-def loadData(data_folder):
+def loadData(data_folder, with_env=True):
     """
     :param data_folder: (str) path to the data_folder to be loaded
+    :param with_env: (boolean) if the dataset is generated from an RL env
     :return: (Numpy dictionary-like objects and np.ndarrays)
     """
+    training_data, ground_truth, true_states, target_pos_ = None, None, None, None
     training_data = np.load('data/{}/preprocessed_data.npz'.format(data_folder))
     episode_starts = training_data['episode_starts']
 
     ground_truth = np.load('data/{}/ground_truth.npz'.format(data_folder))
-    # Backward compatibility with previous names
-    true_states = ground_truth['ground_truth_states' if 'ground_truth_states' in ground_truth.keys() else 'arm_states']
-    target_positions = \
-        ground_truth['target_positions' if 'target_positions' in ground_truth.keys() else 'button_positions']
+    if with_env:
+        # Backward compatibility with previous names
+        true_states = ground_truth['ground_truth_states' if 'ground_truth_states' in ground_truth.keys() else 'arm_states']
+        target_positions = \
+            ground_truth['target_positions' if 'target_positions' in ground_truth.keys() else 'button_positions']
 
-    with open('data/{}/dataset_config.json'.format(data_folder), 'r') as f:
-        relative_pos = json.load(f).get('relative_pos', False)
+        with open('data/{}/dataset_config.json'.format(data_folder), 'r') as f:
+            relative_pos = json.load(f).get('relative_pos', False)
 
-    target_pos_ = []
-    # True state is the relative position to the target
-    target_idx = -1
-    for i in range(len(episode_starts)):
-        if episode_starts[i] == 1:
-            target_idx += 1
-        if relative_pos:
-            true_states[i] -= target_positions[target_idx]
-        target_pos_.append(target_positions[target_idx])
-    target_pos_ = np.array(target_pos_)
+        target_pos_ = []
+        # True state is the relative position to the target
+        target_idx = -1
+        for i in range(len(episode_starts)):
+            if episode_starts[i] == 1:
+                target_idx += 1
+            if relative_pos:
+                true_states[i] -= target_positions[target_idx]
+            target_pos_.append(target_positions[target_idx])
+        target_pos_ = np.array(target_pos_)
 
     return training_data, ground_truth, true_states, target_pos_
+
+def loadDataCVAE(data_folder):
+    training_data = np.load('data/{}/preprocessed_data.npz'.format(data_folder))
+    ground_truth = np.load('data/{}/ground_truth.npz'.format(data_folder))
+
+    return training_data, ground_truth, None, None
 
 
 def getInputBuiltin():

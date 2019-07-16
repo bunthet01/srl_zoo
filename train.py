@@ -155,7 +155,7 @@ if __name__ == '__main__':
         "To use the perceptual loss with a VAE, please specify a path to a pre-trained DAE model"
     assert not ("dae" in losses and "perceptual" in losses), \
         "Please learn the DAE before learning a VAE with the perceptual loss "
-    assert not ("cvae" in losses and len(losses) > 1), "cvae cannot used with other losses"
+    # assert not ("cvae" in losses and len(losses) > 1), "cvae cannot used with other losses"
 
     print('Loading data ... ')
 

@@ -81,7 +81,7 @@ class CVAETrainer(nn.Module):
 			self.model.compute_tensor_cvae(next_obs, next_action)
 		# states, next_states = self.model(obs), self.model(next_obs)
 		kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager=loss_manager, beta=beta)
-		generationLoss(decoded_obs, next_decoded_obs, obs, next_obs, weight=1.0, loss_manager=loss_manager)
+		generationLoss(decoded_obs, next_decoded_obs, obs, next_obs, weight=1, loss_manager=loss_manager)
 		loss_manager.updateLossHistory()
 		loss = loss_manager.computeTotalLoss()
 		if not valid_mode:

@@ -337,6 +337,7 @@ def printGTC(states_pred, ground_truth, target_positions, truncate=None):
         gtc.append(compute_GTC(states_pred, gt_states))
     gtc = np.hstack(gtc)
     print("GTC: {}".format(gtc))
+    print("GTC's mean:  {}".format(np.mean(gtc)))
     return gtc, np.mean(gtc)
 
 

@@ -22,8 +22,8 @@ from losses.losses import LossManager, autoEncoderLoss, roboticPriorsLoss, tripl
 from losses.utils import findPriorsPairs
 from pipeline import NAN_ERROR
 from plotting.representation_plot import plotRepresentation, plotImage, printGTC
-from preprocessing.data_loader import convertScalerToVectorAction, RobotEnvDataset
-from preprocessing.utils import deNormalize
+from preprocessing.data_loader import RobotEnvDataset
+from preprocessing.utils import deNormalize, convertScalerToTensorAction
 from utils import printRed, detachToNumpy, printYellow
 from .modules import SRLModules
 from .priors import Discriminator as PriorDiscriminator
@@ -96,7 +96,7 @@ class BaseLearner(object):
         predictions = []
         for batch in data_loader:
             obs = batch[0].to(self.device)
-            action = convertScalerToVectorAction(batch[1]).to(self.device)
+            action = convertScalerToTensorAction(batch[1]).to(self.device)
             predictions.append(self._predFn(obs, action, self.use_cvae))
 
         return np.concatenate(predictions, axis=0)
@@ -479,7 +479,7 @@ class SRL4robotics(BaseLearner):
             N_EPOCHS = 0
             printYellow("Skipping training because using random features")
             torch.save(self.module.state_dict(), best_model_path)
-
+        print("======================================================================================================================================")
         for epoch in range(N_EPOCHS):
             for valid_mode, dataloader in enumerate([dataloader_train, dataloader_valid]):
                 if monitor_mode == 'pbar':
@@ -648,8 +648,8 @@ class SRL4robotics(BaseLearner):
                     else:  # ============= Main update for usual srl model ====================
                         # Compute weighted average of losses of encoder part (including 'forward'/'inverse'/'reward' models)
                         if self.use_cvae:
-                            action_cvae = convertScalerToVectorAction(action).to(self.device)
-                            next_action_cvae = convertScalerToVectorAction(next_action).to(self.device)
+                            action_cvae = convertScalerToTensorAction(action).to(self.device)
+                            next_action_cvae = convertScalerToTensorAction(next_action).to(self.device)
 
                             loss = self.module.model.train_on_batch(obs, next_obs, action_cvae, next_action_cvae, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
                         else:
@@ -844,16 +844,6 @@ class SRL4robotics(BaseLearner):
                                 images = make_grid([obs[0], reconstruct_obs[0], obs[1], reconstruct_obs[1]], nrow=2)
                                 plotImage(deNormalize(detachToNumpy(images)), mode='cv2',
                                           save2dir=figdir_recon, index=epoch+1)
-
-
-                            elif obs[0].shape[0] % 3 == 0:  # Multi-RGB
-                                raise NotImplementedError
-                                for k in range(obs[0].shape[0] // 3):
-                                    plotImage(deNormalize(detachToNumpy(obs[0][k * 3:(k + 1) * 3, :, :])),
-                                              "Input Image {} (Train)".format(k + 1))
-                                           "Reconstructed Image predicted DAE")
-                                    plotImage(deNormalize(detachToNumpy(reconstruct_obs[0][k * 3:(k + 1) * 3, :, :])),
-                                              "Reconstructed Image {}".format(k + 1))
                     if (self.use_reward2_loss and self.use_split) or self.use_reward_loss:
                         if f1_score > best_f1:
                             best_f1 = f1_score
@@ -862,6 +852,7 @@ class SRL4robotics(BaseLearner):
                         else:
                             f1_score_str = "{:.4f}".format(f1_score)
                         print("F1 score: {}; Recall: {:.4f}".format(f1_score_str, recall))
+            print("======================================================================================================================================")
 
         # Load best model before predicting states
         self.module.load_state_dict(torch.load(best_model_path))
