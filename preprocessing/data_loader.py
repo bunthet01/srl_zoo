@@ -162,8 +162,8 @@ class DataLoader(object):
         :param apply_occlusion: is the use of occlusion enabled - when using DAE (bool)
         :param occlusion_percentage: max percentage of occlusion when using DAE (float)
         :param is_training: (bool)
-            Set to True, the dataloader will output both `obs` and `next_obs` (a tuple of th.Tensor)
-            Set to false, it will only output one th.Tensor.
+        Set to True, the dataloader will output both `obs` and `next_obs` (a tuple of th.Tensor)
+        Set to false, it will only output one th.Tensor.
         """
         super(DataLoader, self).__init__()
         self.n_workers = n_workers
@@ -339,6 +339,108 @@ class DataLoader(object):
         # th.tensor creates a copy
         im = th.tensor(im.reshape((1,) + im.shape).transpose(0, 3, 2, 1))
         return im
+
+    def __len__(self):
+        return self.n_minibatches
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        while True:
+            try:
+                val = self.queue.get_nowait()
+                break
+            except queue.Empty:
+                time.sleep(0.001)
+                continue
+        if val is None:
+            raise StopIteration
+        return val
+
+    next = __next__  # Python 2 compatibility
+
+    def __del__(self):
+        if self.process is not None:
+            self.process.terminate()
+
+
+class DataLoaderCVAE(object):
+    def __init__(self, minibatchlist,actions_unnormalize, generative_model_state_dim, n_workers=1, max_queue_len=4, infinite_loop=True):
+        """
+        A Custom dataloader to work with our datasets, and to prepare data for the different models
+        (inverse, priors, autoencoder, ...)
+        :param minibatchlist: ([np.array]) list of observations indices (grouped per minibatch)
+        :param n_workers: (int) number of preprocessing worker (load and preprocess each image)
+        :param max_queue_len: (int) Max number of minibatches that can be preprocessed at the same time
+        """
+        super(DataLoaderCVAE, self).__init__()
+        self.n_workers = n_workers
+        self.minibatchlist = minibatchlist
+        self.actions_unnormalize = actions_unnormalize
+        self.generative_model_state_dim = generative_model_state_dim
+        self.queue = Queue(max_queue_len)
+        self.infinite_loop = infinite_loop
+        self.process = None
+        self.startProcess()
+        
+
+    @staticmethod
+    def createTestMinibatchList(n_samples, batch_size):
+        """
+        Create list of minibatch for plotting
+        :param n_samples: (int)
+        :param batch_size: (int)
+        :return: ([np.array])
+        """
+        minibatchlist = []
+        if n_samples%batch_size == 0:
+            n_batchs = n_samples // batch_size
+        else:
+            n_batchs = n_samples // batch_size +1
+        for i in range(n_batchs):
+            start_idx = i * batch_size
+            end_idx = min(n_samples, (i + 1) * batch_size)
+            minibatchlist.append(np.arange(start_idx, end_idx))
+        return minibatchlist
+
+    def startProcess(self):
+        """Start preprocessing process"""
+        self.process = Process(target=self._run)
+        # Make it a deamon, so it will be deleted at the same time
+        # of the main process
+        self.process.daemon = True
+        self.process.start()
+
+    def _run(self):
+        start = True
+        with Parallel(n_jobs=self.n_workers, batch_size="auto", backend="threading") as parallel:
+            while start or self.infinite_loop:
+                start = False    
+                indices = np.arange(len(self.minibatchlist), dtype=np.int64)
+                for minibatch_idx in indices:
+                    if self.n_workers <= 1:
+                        batch = self._makeBatchElement(minibatch_idx, self.minibatchlist, self.generative_model_state_dim, self.actions_unnormalize )
+                                 
+                    else:
+                        batch = parallel(delayed(self._makeBatchElement(minibatch_idx, self.minibatchlist, self.generative_model_state_dim, self.actions_unnormalize )))
+
+                    # batch = th.cat(batch, dim=0)
+                    self.queue.put(batch)
+
+                    # Free memory
+                    del batch
+
+                self.queue.put(None)
+
+    @classmethod
+    def _makeBatchElement(cls, minibatch_idx, minibatchlist, generative_model_state_dim, actions_unnormalize):
+        """
+        """
+        z = th.from_numpy(np.random.normal(0,1,(minibatchlist[minibatch_idx].shape[0], generative_model_state_dim))).float()
+        actions = th.FloatTensor(actions_unnormalize[minibatchlist[minibatch_idx]])
+
+        return (z, actions)
 
     def __len__(self):
         return self.n_minibatches

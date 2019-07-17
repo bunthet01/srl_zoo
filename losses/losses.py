@@ -290,7 +290,7 @@ def kullbackLeiblerLossCCI(mu, next_mu, logvar, next_logvar, c, gamma, loss_mana
     :param next_logvar: log of the variance of the distribution of next samples (th.Tensor)
     :param loss_manager: loss criterion needed to log the loss value (LossManager)
     :param gamma: (float)
-    :param c: (float)
+    :param c: (float) capacity 
     """
     kl_divergence = -0.5 * th.sum(1 + logvar - mu.pow(2) - logvar.exp())
     kl_divergence += -0.5 * th.sum(1 + next_logvar - next_mu.pow(2) - next_logvar.exp())
