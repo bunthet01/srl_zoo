@@ -82,7 +82,11 @@ if __name__ == '__main__':
     parser.add_argument('--srl-pre-weights', type=str, default=None,
                         help="Load SRL pretrained weights.")
     parser.add_argument('--debug', action='store_true', default=False,
-                        help="Debug mode.")                        
+                        help="Debug mode.")  
+    parser.add_argument('--Cmax', type=float, default=50,
+                        help='(For CCI-VAE or CCI-CVAE)') 
+    parser.add_argument('--use-cci', action='store_true', default=False, help='if cci is use in VAE')
+                     
     args = parser.parse_args()
     # args.cuda = not args.no_cuda and th.cuda.is_available()
     args.data_folder = parseDataFolder(args.data_folder)
@@ -155,6 +159,7 @@ if __name__ == '__main__':
         "To use the perceptual loss with a VAE, please specify a path to a pre-trained DAE model"
     assert not ("dae" in losses and "perceptual" in losses), \
         "Please learn the DAE before learning a VAE with the perceptual loss "
+    assert not (args.use_cci and ("vae" not in losses or "cvae" not in losses), "cci cannot used without vae or cvae"
     # assert not ("cvae" in losses and len(losses) > 1), "cvae cannot used with other losses"
 
     print('Loading data ... ')
@@ -202,7 +207,7 @@ if __name__ == '__main__':
     srl = SRL4robotics(args.state_dim, class_dim, img_shape=img_shape, model_type=args.model_type, inverse_model_type=args.inverse_model_type,
                        seed=args.seed,log_folder=args.log_folder, learning_rate=args.learning_rate, learning_rate_gan=( args.learning_rate_D,
                         args.learning_rate_G),l1_reg=args.l1_reg, l2_reg=args.l2_reg, cuda=args.gpu_num, multi_view=args.multi_view,losses=losses,
-                        losses_weights_dict=losses_weights_dict, n_actions=n_actions, beta=args.beta,
+                        losses_weights_dict=losses_weights_dict, n_actions=n_actions, beta=args.beta, use_cci=args.use_cci, Cmax=args.Cmax,
                         split_dimensions=split_dimensions, path_to_dae=args.path_to_dae, state_dim_dae=args.state_dim_dae, 
                         occlusion_percentage=args.occlusion_percentage, pretrained_weights_path=args.srl_pre_weights)
 

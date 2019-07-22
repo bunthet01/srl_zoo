@@ -261,7 +261,7 @@ def perceptualSimilarityLoss(encoded_real, encoded_prediction, next_encoded_real
     return weight * pretrained_dae_encoding_loss
 
 
-def kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager, beta=1):
+def kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager, beta, c):
     """
     KL divergence losses summed over all elements and batch
     :param mu: mean of the distribution of samples (th.Tensor)
@@ -277,8 +277,8 @@ def kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager, beta=1):
     # https://arxiv.org/abs/1312.6114
     kl_divergence = -0.5 * th.sum(1 + logvar - mu.pow(2) - logvar.exp())
     kl_divergence += -0.5 * th.sum(1 + next_logvar - next_mu.pow(2) - next_logvar.exp())
-    loss_manager.addToLosses('kl_loss', beta, kl_divergence)
-    return beta * kl_divergence
+    loss_manager.addToLosses('kl_loss', beta, abs(kl_divergence-c))
+    return beta * abs(kl_divergence-c)
 #######################################################################
 def BCEloss(recon_x, x, loss_manager, weight):
     print(x.size(0))
@@ -298,7 +298,7 @@ def KLDloss(mu, logvar, loss_manager, beta=1):
 	
 
 
-def kullbackLeiblerLossCCI(mu, next_mu, logvar, next_logvar, c, gamma, loss_manager):
+def kullbackLeiblerLossCCI(mu, next_mu, logvar, next_logvar, gamma, loss_manager, c=0):
     """
     KL divergence losses summed over all elements and batch
     :param mu: mean of the distribution of samples (th.Tensor)

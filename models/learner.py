@@ -192,7 +192,9 @@ class SRL4robotics(BaseLearner):
     :param losses: ([str])
     :param losses_weights_dict: (OrderedDict)
     :param n_actions: (int)
-    :param beta: (float) for beta-vae
+    :param beta: (float) for beta-vae, cci-vae, and cci-cvae
+    :param use_cci: (bool) if cci is used
+    :param Cmax: (float) for cci-vae or cci-cvae
     :param split_dimensions:
     :param path_to_dae: (str) path to pre-trained DAE when using perceptual loss
     :param state_dim_dae: (int)
@@ -202,7 +204,7 @@ class SRL4robotics(BaseLearner):
 
     def __init__(self, state_dim, class_dim, img_shape=None, model_type="resnet", inverse_model_type="linear", log_folder="logs/default",
                  seed=1, learning_rate=0.001, learning_rate_gan=(0.001, 0.001), l1_reg=0.0, l2_reg=0.0, cuda=-1,
-                 multi_view=False, losses=None, losses_weights_dict=None, n_actions=6, beta=1,
+                 multi_view=False, losses=None, losses_weights_dict=None, n_actions=6, beta=1, Cmax=50, use_cci=False,
                  split_dimensions=-1, path_to_dae=None, state_dim_dae=200, occlusion_percentage=None, pretrained_weights_path=None, debug=False):
 
         super(SRL4robotics, self).__init__(state_dim, class_dim, BATCH_SIZE, seed, cuda, use_cvae="cvae" in losses)
@@ -211,6 +213,8 @@ class SRL4robotics(BaseLearner):
         self.losses = losses
         self.dim_action = n_actions
         self.beta = beta
+        self.use_cci = use_cci
+        self.Cmax = Cmax
         self.denoiser = None
         self.img_shape = img_shape
         self.model_type = model_type
@@ -647,12 +651,15 @@ class SRL4robotics(BaseLearner):
                     # elif: ## ===========  add special srl model here. ===========
                     else:  # ============= Main update for usual srl model ====================
                         # Compute weighted average of losses of encoder part (including 'forward'/'inverse'/'reward' models)
+                        if self.use_cci: c = self.Cmax*(minibatch_num+epoch*len(minibatchlist))/(N_EPOCHS*len(minibatchlist))
+                        else: c = 0
+                        
                         if self.use_cvae:
                             action_cvae = one_hot(action).to(self.device)
                             next_action_cvae = one_hot(next_action).to(self.device)
-
-                            loss = self.module.model.train_on_batch(obs, next_obs, action_cvae, next_action_cvae, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
-                            #loss = self.module.model.train_on_batch(obs, action_cvae, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
+                            loss = self.module.model.train_on_batch(obs, next_obs, action_cvae, next_action_cvae, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device,beta=self.beta, c )
+                        elif self.use_vae:
+                            loss = self.module.model.train_on_batch(obs, next_obs, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device, beta=self.beta, c)
                         else:
                             loss = self.module.model.train_on_batch(obs, next_obs, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
                         history_message = ""

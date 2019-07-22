@@ -140,10 +140,11 @@ class CVAETrainer(nn.Module):
             raise NotImplementedError(
                 "model type: ({}) not supported yet.".format(model_type))
 
-    def train_on_batch(self, obs, next_obs,action, next_action, optimizer, loss_manager, valid_mode=False, device=th.device('cpu'), beta=1.0):
+    def train_on_batch(self, obs, next_obs,action, next_action, optimizer, loss_manager, valid_mode=False, device=th.device('cpu'), beta, c):
         (decoded_obs, mu, logvar), (next_decoded_obs, next_mu, next_logvar) = self.model.compute_tensor_cvae(obs,action), \
             self.model.compute_tensor_cvae(next_obs, next_action)
-        kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager=loss_manager, beta=beta)
+        kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager, beta, c)
+        print("c : ",c)
         generationLoss(decoded_obs, next_decoded_obs, obs, next_obs, weight=1, loss_manager=loss_manager)
        
         loss_manager.updateLossHistory()
