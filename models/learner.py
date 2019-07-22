@@ -18,12 +18,12 @@ from tqdm import tqdm
 
 from losses.losses import LossManager, autoEncoderLoss, roboticPriorsLoss, tripletLoss, rewardModelLoss, \
     rewardPriorLoss, forwardModelLoss, inverseModelLoss, episodePriorLoss, l1Loss, l2Loss, kullbackLeiblerLoss, \
-    kullbackLeiblerLossCCI, generationLoss, ganNonSaturateLoss
+    kullbackLeiblerLossCCI, generationLoss, ganNonSaturateLoss, KLDloss, BCEloss
 from losses.utils import findPriorsPairs
 from pipeline import NAN_ERROR
 from plotting.representation_plot import plotRepresentation, plotImage, printGTC
 from preprocessing.data_loader import RobotEnvDataset
-from preprocessing.utils import deNormalize, convertScalerToTensorAction
+from preprocessing.utils import deNormalize, one_hot
 from utils import printRed, detachToNumpy, printYellow
 from .modules import SRLModules
 from .priors import Discriminator as PriorDiscriminator
@@ -96,7 +96,7 @@ class BaseLearner(object):
         predictions = []
         for batch in data_loader:
             obs = batch[0].to(self.device)
-            action = convertScalerToTensorAction(batch[1]).to(self.device)
+            action = one_hot(batch[1]).to(self.device)
             predictions.append(self._predFn(obs, action, self.use_cvae))
 
         return np.concatenate(predictions, axis=0)
@@ -648,10 +648,11 @@ class SRL4robotics(BaseLearner):
                     else:  # ============= Main update for usual srl model ====================
                         # Compute weighted average of losses of encoder part (including 'forward'/'inverse'/'reward' models)
                         if self.use_cvae:
-                            action_cvae = convertScalerToTensorAction(action).to(self.device)
-                            next_action_cvae = convertScalerToTensorAction(next_action).to(self.device)
+                            action_cvae = one_hot(action).to(self.device)
+                            next_action_cvae = one_hot(next_action).to(self.device)
 
                             loss = self.module.model.train_on_batch(obs, next_obs, action_cvae, next_action_cvae, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
+                            #loss = self.module.model.train_on_batch(obs, action_cvae, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
                         else:
                             loss = self.module.model.train_on_batch(obs, next_obs, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
                         history_message = ""
@@ -841,6 +842,7 @@ class SRL4robotics(BaseLearner):
                                 else:
                                     reconstruct_obs = self.module.model.reconstruct(obs)
                                 # , normalize=True, range=(0,1)
+                                print(reconstruct_obs.size())
                                 images = make_grid([obs[0], reconstruct_obs[0], obs[1], reconstruct_obs[1]], nrow=2)
                                 plotImage(deNormalize(detachToNumpy(images)), mode='cv2',
                                           save2dir=figdir_recon, index=epoch+1)

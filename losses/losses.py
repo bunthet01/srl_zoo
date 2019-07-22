@@ -279,6 +279,23 @@ def kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager, beta=1):
     kl_divergence += -0.5 * th.sum(1 + next_logvar - next_mu.pow(2) - next_logvar.exp())
     loss_manager.addToLosses('kl_loss', beta, kl_divergence)
     return beta * kl_divergence
+#######################################################################
+def BCEloss(recon_x, x, loss_manager, weight):
+    print(x.size(0))
+    print(x.size(1))
+    print(x.size(2))
+    generation_loss = F.mse_loss(recon_x, x.view(-1,x.size(1)*x.size(2)*x.size(3)), reduction='sum')
+    loss_name = 'BCEloss'
+    loss_manager.addToLosses(loss_name, weight, generation_loss)
+    return weight * generation_loss
+	
+def KLDloss(mu, logvar, loss_manager, beta=1):
+    kl_divergence = -0.5 * th.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    loss_manager.addToLosses('KLDloss', beta, kl_divergence)
+    return beta * kl_divergence
+	
+#######################################################################
+	
 
 
 def kullbackLeiblerLossCCI(mu, next_mu, logvar, next_logvar, c, gamma, loss_manager):

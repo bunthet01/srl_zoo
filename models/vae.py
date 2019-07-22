@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 
 import torch
+import numpy as np
 import torch.nn as nn
 from torchsummary import summary
 try:
@@ -49,7 +50,7 @@ class DenseVAE(BaseModelVAE):
         return self.encoder_fc21(x), self.encoder_fc22(x)
 
     def decode(self, z):
-        return self.decoder(z)
+        return self.decoder(z).view(-1, self.img_shape[0], self.img_shape[1], self.img_shape[2] )
 
 
 class CNNVAE(BaseModelVAE):

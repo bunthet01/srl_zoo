@@ -68,7 +68,7 @@ def deNormalize(x, mode="tf"):
     # Clip to fix numeric imprecision (1e-09 = 0)
     return np.clip(x, 0, 1)
 
-def convertScalerToTensorAction(x):
+def one_hot(x):
     """
     :param x: th.tensor() or np.ndarray() or list
     :return: th.FloatTensor()

@@ -243,12 +243,10 @@ class DataLoader(object):
                                                                   absolute_path=self.absolute_path)
                             for image_path in images)
                         if self.apply_occlusion:
-                            batch_noisy = parallel(
-                                delayed(self._makeBatchElement)(image_path, self.img_shape, self.multi_view, self.use_triplets,
+                            batch_noisy = parallel(delayed(self._makeBatchElement)(image_path, self.img_shape, self.multi_view, self.use_triplets,
                                                                 apply_occlusion=self.apply_occlusion,
                                                                 occlusion_percentage=self.occlusion_percentage,
-                                                                absolute_path=self.absolute_path)
-                                for image_path in images)
+                                                                absolute_path=self.absolute_path) for image_path in images)
 
                     batch = th.cat(batch, dim=0)
                     if self.apply_occlusion:
@@ -366,17 +364,19 @@ class DataLoader(object):
 
 
 class DataLoaderCVAE(object):
-    def __init__(self, minibatchlist,actions_unnormalize, generative_model_state_dim, n_workers=1, max_queue_len=4, infinite_loop=True):
+    def __init__(self, minibatchlist,actions_unnormalize, generative_model_state_dim, seed, max_queue_len=4, infinite_loop=True):
         """
-        A Custom dataloader to work with our datasets, and to prepare data for the different models
-        (inverse, priors, autoencoder, ...)
-        :param minibatchlist: ([np.array]) list of observations indices (grouped per minibatch)
+        A Custom dataloader preparing data to forward to CVAE model   
         :param n_workers: (int) number of preprocessing worker (load and preprocess each image)
         :param max_queue_len: (int) Max number of minibatches that can be preprocessed at the same time
+        :param infinite_loop: (bool) whether to have an iterator that can be resetted
+        :param generative_model_state_dim:([np.array]) The dimension of the latent variable in generative model  
+        :param actions_unnormalize : ([np.array]) The actions used to generate observations with CVAE
+        :param seed :(int) random seed used to generated latent variable
         """
         super(DataLoaderCVAE, self).__init__()
-        self.n_workers = n_workers
         self.minibatchlist = minibatchlist
+        self.seed = seed
         self.actions_unnormalize = actions_unnormalize
         self.generative_model_state_dim = generative_model_state_dim
         self.queue = Queue(max_queue_len)
@@ -388,7 +388,7 @@ class DataLoaderCVAE(object):
     @staticmethod
     def createTestMinibatchList(n_samples, batch_size):
         """
-        Create list of minibatch for plotting
+        Create list of minibatch for dataloader
         :param n_samples: (int)
         :param batch_size: (int)
         :return: ([np.array])
@@ -414,29 +414,23 @@ class DataLoaderCVAE(object):
 
     def _run(self):
         start = True
-        with Parallel(n_jobs=self.n_workers, batch_size="auto", backend="threading") as parallel:
-            while start or self.infinite_loop:
-                start = False    
-                indices = np.arange(len(self.minibatchlist), dtype=np.int64)
-                for minibatch_idx in indices:
-                    if self.n_workers <= 1:
-                        batch = self._makeBatchElement(minibatch_idx, self.minibatchlist, self.generative_model_state_dim, self.actions_unnormalize )
-                                 
-                    else:
-                        batch = parallel(delayed(self._makeBatchElement(minibatch_idx, self.minibatchlist, self.generative_model_state_dim, self.actions_unnormalize )))
+        while start or self.infinite_loop:
+            start = False    
+            indices = np.arange(len(self.minibatchlist), dtype=np.int64)
+            for minibatch_idx in indices:
+                batch = self._makeBatchElement(minibatch_idx, self.minibatchlist, self.generative_model_state_dim, self.actions_unnormalize, self.seed )
+                self.queue.put(batch)
 
-                    # batch = th.cat(batch, dim=0)
-                    self.queue.put(batch)
+                # Free memory
+                del batch
 
-                    # Free memory
-                    del batch
-
-                self.queue.put(None)
+            self.queue.put(None)
 
     @classmethod
-    def _makeBatchElement(cls, minibatch_idx, minibatchlist, generative_model_state_dim, actions_unnormalize):
+    def _makeBatchElement(cls, minibatch_idx, minibatchlist, generative_model_state_dim, actions_unnormalize, seed):
         """
         """
+        np.random.seed(seed+minibatch_idx)
         z = th.from_numpy(np.random.normal(0,1,(minibatchlist[minibatch_idx].shape[0], generative_model_state_dim))).float()
         actions = th.FloatTensor(actions_unnormalize[minibatchlist[minibatch_idx]])
 
