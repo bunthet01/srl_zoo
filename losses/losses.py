@@ -234,6 +234,7 @@ def generationLoss(decoded, next_decoded, obs, next_obs, weight, loss_manager):
     """
     generation_loss = F.mse_loss(decoded, obs, reduction='sum')
     generation_loss += F.mse_loss(next_decoded, next_obs, reduction='sum')
+    # generation_loss = reconstructionLoss(obs, decoded) + reconstructionLoss(next_obs, next_decoded)
     loss_name = 'generation_loss'
     loss_manager.addToLosses(loss_name, weight, generation_loss)
     return weight * generation_loss

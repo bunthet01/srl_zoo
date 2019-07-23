@@ -106,12 +106,11 @@ class VAETrainer(nn.Module):
             raise NotImplementedError(
                 "model type: ({}) not supported yet.".format(model_type))
 
-    def train_on_batch(self, obs, next_obs, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu'), beta, c):
+    def train_on_batch(self, obs, next_obs, optimizer, loss_manager, valid_mode, device, beta, c):
         (decoded_obs, mu, logvar), (next_decoded_obs, next_mu, next_logvar) = self.model.compute_tensors(obs), \
             self.model.compute_tensors(next_obs)
         # states, next_states = self.model(obs), self.model(next_obs)
         kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager, beta, c)
-        print("c : ",c)
         generationLoss(decoded_obs, next_decoded_obs, obs, next_obs, weight=1, loss_manager=loss_manager) #0.5e-6
         loss_manager.updateLossHistory()
         loss = loss_manager.computeTotalLoss()

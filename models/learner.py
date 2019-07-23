@@ -484,6 +484,7 @@ class SRL4robotics(BaseLearner):
             printYellow("Skipping training because using random features")
             torch.save(self.module.state_dict(), best_model_path)
         print("======================================================================================================================================")
+        print('enumerate([dataloader_train, dataloader_valid])', [(i,j) in enumerate([dataloader_train, dataloader_valid]) ])
         for epoch in range(N_EPOCHS):
             for valid_mode, dataloader in enumerate([dataloader_train, dataloader_valid]):
                 if monitor_mode == 'pbar':
@@ -529,8 +530,15 @@ class SRL4robotics(BaseLearner):
 
                     # Actions associated to the observations
                     if self.use_forward_loss or self.use_inverse_loss or self.use_reward_loss or self.use_reward2_loss:
-                        states, next_states = self.module(obs), self.module(next_obs)
-                        actions_st = action.view(-1, 1).to(self.device)
+                        if self.use_cvae:
+                            action_cvae = one_hot(action).to(self.device)
+                            next_action_cvae = one_hot(next_action).to(self.device)
+                            states, next_states = self.module.model(obs, action_cvae), self.module.model(next_obs, next_action_cvae)
+                            actions_st = action.view(-1, 1).to(self.device)
+                        else:
+                            states, next_states = self.module(obs), self.module(next_obs)
+                            actions_st = action.view(-1, 1).to(self.device)
+                        
 
                     if not self.use_split:
                         if self.use_forward_loss:
@@ -651,15 +659,17 @@ class SRL4robotics(BaseLearner):
                     # elif: ## ===========  add special srl model here. ===========
                     else:  # ============= Main update for usual srl model ====================
                         # Compute weighted average of losses of encoder part (including 'forward'/'inverse'/'reward' models)
-                        if self.use_cci: c = self.Cmax*(minibatch_num+epoch*len(minibatchlist))/(N_EPOCHS*len(minibatchlist))
+                        if self.use_cci:
+                            if not valid_mode:
+                                c = self.Cmax*(iter_ind+epoch*len(dataloader_train))/(N_EPOCHS*len(dataloader_train))
                         else: c = 0
                         
                         if self.use_cvae:
                             action_cvae = one_hot(action).to(self.device)
                             next_action_cvae = one_hot(next_action).to(self.device)
-                            loss = self.module.model.train_on_batch(obs, next_obs, action_cvae, next_action_cvae, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device,beta=self.beta, c )
+                            loss = self.module.model.train_on_batch(obs, next_obs, action_cvae, next_action_cvae, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c )
                         elif self.use_vae:
-                            loss = self.module.model.train_on_batch(obs, next_obs, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device, beta=self.beta, c)
+                            loss = self.module.model.train_on_batch(obs, next_obs, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c)
                         else:
                             loss = self.module.model.train_on_batch(obs, next_obs, self.optimizer, loss_manager, valid_mode=valid_mode, device=self.device)
                         history_message = ""
@@ -667,9 +677,11 @@ class SRL4robotics(BaseLearner):
                         epoch_batches += 1
                         if not valid_mode:
                             # mean training loss so far
+                            print('epoch_batch train: ', epoch_batches)
                             train_loss = epoch_loss / float(epoch_batches)
                         else:
                             # mean validation loss so far
+                            print('epoch_batch train: ', epoch_batches)
                             val_loss = epoch_loss / float(epoch_batches)
                     # Accuracy
                     if self.use_split:
@@ -771,6 +783,12 @@ class SRL4robotics(BaseLearner):
 
             # Even if loss_history is modified by LossManager
             # we make it explicit ???
+            print('loss_history : ', loss_history)
+            print('train_loss ', train_loss)
+            print('val_loss ', val_loss)
+            print('epoch loss ', epoch_loss)
+            print('epoch_batches ', epoch_batches)
+            print('epoch ',epoch )
 
             def update_loss_history(loss_manager, train_loss, val_loss, epoch_batches, epoch):
                 loss_history = loss_manager.loss_history
@@ -784,6 +802,7 @@ class SRL4robotics(BaseLearner):
                         loss_history[key].append(0)
                 return loss_history
             loss_history = update_loss_history(loss_manager, train_loss, val_loss, epoch_batches, epoch)
+            print('loss_history after new update :', loss_history)
             if self.use_gan and not valid_mode:
                 loss_history_D = update_loss_history(loss_manager_D, train_loss_D, 0, epoch_batches_D, epoch)
                 loss_history_G = update_loss_history(loss_manager_G, train_loss_G, 0, epoch_batches_G, epoch)
@@ -849,7 +868,6 @@ class SRL4robotics(BaseLearner):
                                 else:
                                     reconstruct_obs = self.module.model.reconstruct(obs)
                                 # , normalize=True, range=(0,1)
-                                print(reconstruct_obs.size())
                                 images = make_grid([obs[0], reconstruct_obs[0], obs[1], reconstruct_obs[1]], nrow=2)
                                 plotImage(deNormalize(detachToNumpy(images)), mode='cv2',
                                           save2dir=figdir_recon, index=epoch+1)

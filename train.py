@@ -24,8 +24,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='State Representation Learning with PyTorch')
     parser.add_argument('--epochs', type=int, default=30, metavar='N',
                         help='number of epochs to train (default: 30)')
-    parser.add_argument('--img-shape', type=str, default="(3,128,128)",
-                        help='image shape (default "(3,128,128)"')
+    parser.add_argument('--img-shape', type=str, default="(3,64,64)",
+                        help='image shape (default "(3,64,64)"')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
     parser.add_argument('--state-dim', type=int, default=2, help='state dimension (default: 2)')
@@ -159,7 +159,7 @@ if __name__ == '__main__':
         "To use the perceptual loss with a VAE, please specify a path to a pre-trained DAE model"
     assert not ("dae" in losses and "perceptual" in losses), \
         "Please learn the DAE before learning a VAE with the perceptual loss "
-    assert not (args.use_cci and ("vae" not in losses or "cvae" not in losses), "cci cannot used without vae or cvae"
+    assert not (args.use_cci and ("vae" not in losses and "cvae" not in losses)), "cci cannot used without vae or cvae"
     # assert not ("cvae" in losses and len(losses) > 1), "cvae cannot used with other losses"
 
     print('Loading data ... ')
@@ -194,6 +194,8 @@ if __name__ == '__main__':
     exp_config['n_actions'] = n_actions
     exp_config['multi-view'] = args.multi_view
     exp_config['img_shape'] = args.img_shape
+    exp_config['use_cci'] = args.use_cci
+    exp_config['Cmax'] = args.Cmax
 
     if "dae" in losses:
         exp_config['occlusion-percentage'] = args.occlusion_percentage
