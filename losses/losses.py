@@ -194,17 +194,6 @@ def spclsLoss(cls_pred, cls_gt, weight, loss_manager):
     loss_manager.addToLosses('spcls_loss', weight, cls_loss)
     return weight * cls_loss
 
-def reconstructionLoss(input_image, target_image):
-    """
-    Reconstruction Loss for Autoencoders
-    :param input_image: Observation (th.Tensor)
-    :param target_image: Reconstructed observation (th.Tensor)
-    :return:
-    """
-    # TODO: replace with mse_loss when new release is out.
-    # We use a custom version because of this issue: https://github.com/pytorch/pytorch/issues/10009
-    return th.sum((input_image - target_image) ** 2) / input_image.data.nelement()
-
 
 def autoEncoderLoss(obs, decoded_obs, next_obs, decoded_next_obs, weight, loss_manager):
     """
@@ -220,6 +209,17 @@ def autoEncoderLoss(obs, decoded_obs, next_obs, decoded_next_obs, weight, loss_m
     loss_manager.addToLosses('reconstruction_loss', weight, ae_loss)
     return weight * ae_loss
 
+def reconstructionLoss(input_image, target_image):
+    """
+    Reconstruction Loss for Autoencoders
+    :param input_image: Observation (th.Tensor)
+    :param target_image: Reconstructed observation (th.Tensor)
+    :return:
+    """
+    # TODO: replace with mse_loss when new release is out.
+    # We use a custom version because of this issue: https://github.com/pytorch/pytorch/issues/10009
+    return F.mse_loss(target_image,input_image, reduction='mean')
+    #return th.sum((input_image - target_image) ** 2) / input_image.data.nelement()
 
 def generationLoss(decoded, next_decoded, obs, next_obs, weight, loss_manager):
     """
@@ -232,13 +232,30 @@ def generationLoss(decoded, next_decoded, obs, next_obs, weight, loss_manager):
     :param weight: (float)
     :return: (th.Tensor)
     """
-    generation_loss = F.mse_loss(decoded, obs, reduction='sum')
+    generation_loss = F.mse_loss(decoded,obs, reduction='sum')
     generation_loss += F.mse_loss(next_decoded, next_obs, reduction='sum')
-    # generation_loss = reconstructionLoss(obs, decoded) + reconstructionLoss(next_obs, next_decoded)
     loss_name = 'generation_loss'
     loss_manager.addToLosses(loss_name, weight, generation_loss)
     return weight * generation_loss
 
+def kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager, beta, c):
+    """
+    KL divergence losses summed over all elements and batch
+    :param mu: mean of the distribution of samples (th.Tensor)
+    :param next_mu: mean of the distribution of next samples (th.Tensor)
+    :param logvar: log of the variance of the distribution of samples (th.Tensor)
+    :param next_logvar: log of the variance of the distribution of next samples (th.Tensor)
+    :param loss_manager: loss criterion needed to log the loss value (LossManager)
+    :param beta: (float) used to weight the KL divergence for disentangling
+    """
+
+    # see Appendix B from VAE paper:
+    # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
+    # https://arxiv.org/abs/1312.6114
+    kl_divergence = -0.5 * th.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    kl_divergence += -0.5 * th.sum(1 + next_logvar - next_mu.pow(2) - next_logvar.exp())
+    loss_manager.addToLosses('kl_loss', beta, abs(kl_divergence-c))
+    return beta * abs(kl_divergence-c)
 
 def perceptualSimilarityLoss(encoded_real, encoded_prediction, next_encoded_real, next_encoded_prediction,
                             weight, loss_manager):
@@ -262,24 +279,7 @@ def perceptualSimilarityLoss(encoded_real, encoded_prediction, next_encoded_real
     return weight * pretrained_dae_encoding_loss
 
 
-def kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager, beta, c):
-    """
-    KL divergence losses summed over all elements and batch
-    :param mu: mean of the distribution of samples (th.Tensor)
-    :param next_mu: mean of the distribution of next samples (th.Tensor)
-    :param logvar: log of the variance of the distribution of samples (th.Tensor)
-    :param next_logvar: log of the variance of the distribution of next samples (th.Tensor)
-    :param loss_manager: loss criterion needed to log the loss value (LossManager)
-    :param beta: (float) used to weight the KL divergence for disentangling
-    """
 
-    # see Appendix B from VAE paper:
-    # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
-    # https://arxiv.org/abs/1312.6114
-    kl_divergence = -0.5 * th.sum(1 + logvar - mu.pow(2) - logvar.exp())
-    kl_divergence += -0.5 * th.sum(1 + next_logvar - next_mu.pow(2) - next_logvar.exp())
-    loss_manager.addToLosses('kl_loss', beta, abs(kl_divergence-c))
-    return beta * abs(kl_divergence-c)
 #######################################################################
 def BCEloss(recon_x, x, loss_manager, weight):
     print(x.size(0))

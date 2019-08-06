@@ -54,7 +54,7 @@ class BaseLearner(object):
     :param cuda: (int) (default -1, CPU) equi to CUDA_VISIBLE_DEVICES
     """
 
-    def __init__(self, state_dim, class_dim, batch_size, seed=1, cuda=-1, use_cvae=False):
+    def __init__(self, state_dim, class_dim, batch_size, seed=1, cuda=-1, use_conditional_model=False):
         super(BaseLearner, self).__init__()
         self.state_dim = state_dim
         self.class_dim = class_dim
@@ -62,7 +62,7 @@ class BaseLearner(object):
         self.module = None
         self.seed = seed
         self.use_dae = False
-        self.use_cvae = use_cvae
+        self.use_conditional_model = use_conditional_model
         assert not self.use_dae, "Not implemented error."
         # Seed the random generator
         np.random.seed(seed)
@@ -74,7 +74,7 @@ class BaseLearner(object):
 
         self.device = torch.device("cuda:{}".format(cuda) if torch.cuda.is_available() and (cuda >= 0) else "cpu")
 
-    def _predFn(self, observations, action, use_cvae):
+    def _predFn(self, observations, action, use_conditional_model):
         """
         Predict states in test mode given observations
 
@@ -82,7 +82,7 @@ class BaseLearner(object):
         :return: (np.ndarray)
         """
         # Move the tensor back to the cpu
-        if use_cvae:
+        if use_conditional_model:
             return detachToNumpy(self.module.model(observations, action))
         else:
             return detachToNumpy(self.module.model(observations))
@@ -96,8 +96,8 @@ class BaseLearner(object):
         predictions = []
         for batch in data_loader:
             obs = batch[0].to(self.device)
-            action = one_hot(batch[1]).to(self.device)
-            predictions.append(self._predFn(obs, action, self.use_cvae))
+            action = batch[1].to(self.device)
+            predictions.append(self._predFn(obs, action, self.use_conditional_model))
 
         return np.concatenate(predictions, axis=0)
 
@@ -110,14 +110,22 @@ class BaseLearner(object):
         predictions = []
         gt_reward = []
 
-        for obs, obs_next, rwd in data_loader:
+        for obs, obs_next, rwd, action, next_action in data_loader:
             if reward_name == 'reward':
                 obs = obs.to(self.device)
-                states = self.module.model(obs)
+                if self.use_conditional_model:
+                    action =  one_hot(action).to(self.device)
+                    states = self.module.model(obs, action)
+                else:
+                    states = self.module.model(obs)
                 if split_dim_list is not None:
                     states_split = torch.split(states, split_dim_list, dim=-1)
             obs_next = obs_next.to(self.device)
-            states_next = self.module.model(obs_next)
+            if self.use_conditional_model:
+                next_action = one_hot(next_action).to(self.device)
+                states_next = self.module.model(obs_next, next_action)
+            else:
+                states_next = self.module.model(obs_next)
             if split_dim_list is not None:
                 states_next_split = torch.split(states_next, split_dim_list, dim=-1)
             if reward_name == 'reward2':
@@ -207,7 +215,7 @@ class SRL4robotics(BaseLearner):
                  multi_view=False, losses=None, losses_weights_dict=None, n_actions=6, beta=1, Cmax=50, use_cci=False,
                  split_dimensions=-1, path_to_dae=None, state_dim_dae=200, occlusion_percentage=None, pretrained_weights_path=None, debug=False):
 
-        super(SRL4robotics, self).__init__(state_dim, class_dim, BATCH_SIZE, seed, cuda, use_cvae="cvae" in losses)
+        super(SRL4robotics, self).__init__(state_dim, class_dim, BATCH_SIZE, seed, cuda, use_conditional_model="cvae" in losses)
 
         self.multi_view = multi_view
         self.losses = losses
@@ -219,7 +227,9 @@ class SRL4robotics(BaseLearner):
         self.img_shape = img_shape
         self.model_type = model_type
         self.pretrained_weights_path = pretrained_weights_path
-        if model_type in ["linear", "mlp", "resnet", "custom_cnn", 'gan', 'unet'] \
+        self.cuda = cuda
+        self.device = torch.device("cuda:{}".format(cuda) if torch.cuda.is_available() and (cuda >= 0) else "cpu")
+        if model_type in ["linear", "mlp", "resnet", "custom_cnn","custom_cnn_2", 'gan', 'unet','dc'] \
                 or "autoencoder" in losses or "vae" in losses:
             self.use_forward_loss = "forward" in losses
             self.use_inverse_loss = "inverse" in losses
@@ -235,6 +245,9 @@ class SRL4robotics(BaseLearner):
             # self.perceptual_similarity_loss = "perceptual" in self.losses
             self.use_dae = "dae" in self.losses
             self.use_gan = "gan" in self.losses
+            self.use_gan_new = "gan_new" in self.losses
+            self.use_cgan = "cgan" in self.losses
+            self.use_cgan_new = "cgan_new" in self.losses
             self.path_to_dae = path_to_dae
 
             if isinstance(split_dimensions, OrderedDict) and sum(split_dimensions.values()) > 0:
@@ -244,42 +257,42 @@ class SRL4robotics(BaseLearner):
             else:
                 self.use_split = False
             self.module = SRLModules(state_dim=self.state_dim, class_dim = self.class_dim, img_shape=self.img_shape, action_dim=self.dim_action, model_type=model_type,
-                                     losses=losses, split_dimensions=split_dimensions, inverse_model_type=inverse_model_type)
+                                     losses=losses, split_dimensions=split_dimensions, inverse_model_type=inverse_model_type, device=self.device)
         else:
             raise ValueError("Unknown model: {}".format(model_type))
 
         print("Using {} model".format(model_type))
 
-        self.cuda = cuda
-        self.device = torch.device("cuda:{}".format(cuda) if torch.cuda.is_available() and (cuda >= 0) else "cpu")
+        
 
         if self.episode_prior:
             self.prior_discriminator = PriorDiscriminator(2 * self.state_dim).to(self.device)
 
         self.module = self.module.to(self.device)
-
-        if not self.use_gan:
+        if self.use_gan or self.use_cgan or self.use_gan_new or self.use_cgan_new:
+            assert not self.episode_prior, "NotImplementedError"
+            self.optimizer_D = torch.optim.Adam(
+                self.module.model.discriminator.parameters(), lr=learning_rate_gan[0], betas=(0.5, 0.9))
+            self.optimizer_G = torch.optim.Adam(
+                self.module.model.generator.parameters(), lr=learning_rate_gan[1], betas=(0.5, 0.9))
+            if not self.use_gan_new and not self.use_cgan_new:
+                combined_E_params = [param for param in self.module.model.encoder.parameters()]
+                combined_E_params += [param for param in self.module.model.generator.parameters()]
+                combined_E_params += [param for param in self.module.forward_net.parameters()]
+                combined_E_params += [param for param in self.module.inverse_net.parameters()]
+                combined_E_params += [param for param in self.module.reward_net.parameters()]
+                combined_E_params += [param for param in self.module.classifier.parameters()]
+                # import ipdb; ipdb.set_trace()
+                self.optimizer = torch.optim.Adam(combined_E_params, lr=learning_rate, betas=(0.5, 0.9))
+                # [TODO: check learnable parameters]
+        else:
             learnable_params = [param for param in self.module.parameters() if param.requires_grad]
             # learnable_params = list(self.module.parameters()) ## NEW [TODO]
 
             if self.episode_prior:
                 learnable_params += [p for p in self.prior_discriminator.parameters()]
             self.optimizer = torch.optim.Adam(learnable_params, lr=learning_rate)
-        else:
-            assert not self.episode_prior, "NotImplementedError"
-            self.optimizer_D = torch.optim.Adam(
-                self.module.model.discriminator.parameters(), lr=learning_rate_gan[0], betas=(0.5, 0.9))
-            self.optimizer_G = torch.optim.Adam(
-                self.module.model.generator.parameters(), lr=learning_rate_gan[1], betas=(0.5, 0.9))
-            combined_E_params = [param for param in self.module.model.encoder.parameters()]
-            combined_E_params += [param for param in self.module.model.generator.parameters()]
-            combined_E_params += [param for param in self.module.forward_net.parameters()]
-            combined_E_params += [param for param in self.module.inverse_net.parameters()]
-            combined_E_params += [param for param in self.module.reward_net.parameters()]
-            combined_E_params += [param for param in self.module.classifier.parameters()]
-            # import ipdb; ipdb.set_trace()
-            self.optimizer = torch.optim.Adam(combined_E_params, lr=learning_rate, betas=(0.5, 0.9))
-            # [TODO: check learnable parameters]
+        
         self.log_folder = log_folder
 
         # Default weights that are updated with the weights passed to the script
@@ -374,10 +387,13 @@ class SRL4robotics(BaseLearner):
         # here, we organize the data into minibatches
         # and find pairs for the respective loss terms (for robotics priors only)
         if figdir is not None:
-            figdir_repr = os.path.join(figdir, "state_repr")  # state representation scatter plot
-            figdir_recon = os.path.join(figdir, "img_recon")  # image reconstruction folder
-            os.makedirs(figdir_repr, exist_ok=True)
-            os.makedirs(figdir_recon, exist_ok=True)
+            if self.use_gan_new or self.use_cgan_new:
+                os.makedirs(figdir, exist_ok=True)
+            else:
+                figdir_repr = os.path.join(figdir, "state_repr")  # state representation scatter plot
+                figdir_recon = os.path.join(figdir, "img_recon")  # image reconstruction folder
+                os.makedirs(figdir_repr, exist_ok=True)
+                os.makedirs(figdir_recon, exist_ok=True)
 
         sample_indices = np.arange(len(images_path))
 
@@ -443,35 +459,24 @@ class SRL4robotics(BaseLearner):
             print("Loading pretrained model weights from path: {}...".format(self.pretrained_weights_path))
             self.module.load_state_dict(torch.load(self.pretrained_weights_path))
 
-        # dissimilar_pairs, same_actions_pairs = None, None
-        # if not self.no_priors:
-        #     dissimilar_pairs, same_actions_pairs = findPriorsPairs(self.batch_size, minibatchlist, actions, rewards,
-        #                                                            n_actions, n_pairs_per_action)
-        # if self.use_vae and self.perceptual_similarity_loss and self.path_to_dae is not None:
-        #     self.denoiser = SRLModules(state_dim=self.state_dim_dae, img_shape=self.img_shape, action_dim=self.dim_action,
-        #                                model_type="custom_cnn",
-        #                                losses=["dae"])
-        #     self.denoiser.load_state_dict(torch.load(self.path_to_dae))
-        #     self.denoiser.eval()
-        #     self.denoiser = self.denoiser.to(self.device)
-        #     for param in self.denoiser.parameters():
-        #         param.requires_grad = False
-        # if self.episode_prior:
-        #     idx_to_episode = {idx: episode_idx for idx, episode_idx in enumerate(np.cumsum(episode_starts))}
-        #     minibatch_episodes = [[idx_to_episode[i] for i in minibatch] for minibatch in minibatchlist]
-
         # TRAINING -----------------------------------------------------------------------------------------------------
         loss_history = defaultdict(list)
         loss_manager = LossManager(self.module, loss_history)
 
-        if self.use_gan:
+        if self.use_gan or self.use_cgan or self.use_gan_new or self.use_cgan_new:
             loss_history_D = defaultdict(list)
             loss_history_G = defaultdict(list)
+            
             loss_manager_D = LossManager(self.module.model.discriminator, loss_history_D)
             loss_manager_G = LossManager(self.module.model.generator, loss_history_G)
             # define the labels here so that we can reuse them (save time)
             label_valid = torch.ones((self.batch_size, 1)).to(self.device)
             label_fake = torch.zeros((self.batch_size, 1)).to(self.device)
+        if self.use_gan_new or self.use_cgan_new:
+            best_error_D = np.inf
+            best_error_G = np.inf
+            fixed_sample_state = torch.randn(self.batch_size, self.state_dim, 1, 1)
+            fixed_sample_label = (torch.rand(self.batch_size, 1) * self.class_dim).type(torch.LongTensor).squeeze()
         best_error = np.inf
         best_acc = -np.inf
         best_f1 = -np.inf
@@ -484,18 +489,23 @@ class SRL4robotics(BaseLearner):
             printYellow("Skipping training because using random features")
             torch.save(self.module.state_dict(), best_model_path)
         print("======================================================================================================================================")
-        print('enumerate([dataloader_train, dataloader_valid])', [(i,j) in enumerate([dataloader_train, dataloader_valid]) ])
         for epoch in range(N_EPOCHS):
+            epoch_model_path = "{}/srl_model_{:04d}.pth".format(self.log_folder, epoch+1)
+            if self.use_gan or self.use_cgan:
+                epoch_batches_E_train = 0
+                epoch_batches_D_train = 0
+                epoch_batches_G_train = 0
             for valid_mode, dataloader in enumerate([dataloader_train, dataloader_valid]):
                 if monitor_mode == 'pbar':
                     pbar = tqdm(total=len(dataloader))
 
-                if self.use_gan:
+                if self.use_gan or self.use_cgan or self.use_gan_new or self.use_cgan_new:
                     # GAN's training requires multi-optimizers, thus multiple loss_manager/epoch_loss/val_loss, etc.
                     epoch_loss_D, epoch_batches_D = 0, 0
                     epoch_loss_G, epoch_batches_G = 0, 0
+                    epoch_loss_E, epoch_batches_E = 0, 0
                     d_acc, g_acc = 0, 0
-                epoch_loss, epoch_batches = 0, 0
+                epoch_loss, epoch_batches = 0, 0       
                 ep_rwd_acc, ep_inv_acc, ep_cls_acc = 0, 0, 0
                 n_batch_per_epoch = len(dataloader)
 
@@ -514,9 +524,10 @@ class SRL4robotics(BaseLearner):
                     obs, next_obs = obs.to(self.device), next_obs.to(self.device)
                     cls_gt = cls_gt.to(self.device)
 
-                    if not self.use_gan: # gan need several update of encoder, so do not reset loss here !
+                    if not self.use_gan and not self.use_cgan: # gan need several update of encoder, so do not reset loss here !
                         # It's extremely important to release loss tensor, otherwise it will cause 'memory leak".
-                        self.optimizer.zero_grad()
+                        if not self.use_gan_new and not self.use_cgan_new:
+                            self.optimizer.zero_grad()
                         loss_manager.resetLosses()
 
                     
@@ -531,9 +542,9 @@ class SRL4robotics(BaseLearner):
                     # Actions associated to the observations
                     if self.use_forward_loss or self.use_inverse_loss or self.use_reward_loss or self.use_reward2_loss:
                         if self.use_cvae:
-                            action_cvae = one_hot(action).to(self.device)
-                            next_action_cvae = one_hot(next_action).to(self.device)
-                            states, next_states = self.module.model(obs, action_cvae), self.module.model(next_obs, next_action_cvae)
+                            action = action.to(self.device)
+                            next_action = next_action.to(self.device)
+                            states, next_states = self.module.model(obs, action), self.module.model(next_obs, next_action)
                             actions_st = action.view(-1, 1).to(self.device)
                         else:
                             states, next_states = self.module(obs), self.module(next_obs)
@@ -616,46 +627,79 @@ class SRL4robotics(BaseLearner):
                                                         label_weights=label_weights, ignore_index=-1,
                                                         weight=self.losses_weights_dict['reward'])
 
-                    if self.use_gan:
-                        # import ipdb
-                        # ipdb.set_trace()
-                        loss, history_message = self.module.model.train_on_batch(obs, next_obs,
-                                                                self.optimizer_D, self.optimizer_G, self.optimizer,
-                                                                loss_manager_D, loss_manager_G, loss_manager,
-                                                                epoch_batches_D, epoch_batches_G, epoch_batches,
-                                                                epoch_loss_D, epoch_loss_G, epoch_loss,
-                                                                d_acc, g_acc,
-                                                                batch_size=32, 
-                                                                dataloader=dataloader,
-                                                                valid_mode=valid_mode,
-                                                                device=self.device)
-                        epoch_batches += 1 ## update batch count
-                        if not valid_mode:
-                            # mean training loss so far. For gan, it's already the mean.
-                            train_loss = loss
+                    if self.use_gan or self.use_cgan or self.use_gan_new or self.use_cgan_new:
+                        if self.use_gan_new or self.use_cgan_new:
+                            if self.use_gan_new:
+                                loss_D, loss_G, history_message = self.module.model.train_on_batch(obs,epoch_batches,figdir,epoch,fixed_sample_state, self.optimizer_D, 
+                                                                                               self.optimizer_G, loss_manager_D, 
+                                                                                               loss_manager_G , valid_mode=valid_mode, 
+                                                                                               device=self.device)
+                            else:
+                                loss_D, loss_G, history_message = self.module.model.train_on_batch(obs,action,epoch_batches,figdir,epoch,fixed_sample_state,fixed_sample_label,
+                                                                                               self.optimizer_D, 
+                                                                                               self.optimizer_G, loss_manager_D, 
+                                                                                               loss_manager_G , valid_mode=valid_mode, 
+                                                                                               device=self.device)
+                                
+                            epoch_loss_D +=loss_D
+                            epoch_loss_G +=loss_G
+                            epoch_batches += 1
+                            if not valid_mode:
+                                train_loss = 0
+                                train_loss_D = epoch_loss_D/ float(epoch_batches)
+                                train_loss_G = epoch_loss_G/ float(epoch_batches)
+                            else:
+                                val_loss = 0
+                                val_loss_D = epoch_loss_D/ float(epoch_batches)
+                                val_loss_G = epoch_loss_G/ float(epoch_batches)
+
                         else:
-                            # mean validation loss so far. For gan, it's already the mean.
-                            val_loss = loss
-                        # Custom/Optional plots: training too long, display/save img during training.
-                        if iter_ind % 20 == 0 and not valid_mode:
-                            reconstruct_obs = self.module.model.reconstruct(obs)
-                            # , normalize=True, range=(0,1)
-                            images = make_grid([obs[0], reconstruct_obs[0], obs[1], reconstruct_obs[1]], nrow=2)
-                            plotImage(deNormalize(detachToNumpy(images)), mode='cv2',
-                                      save2dir=figdir_recon, index=(epoch*n_batch_per_epoch+iter_ind))
-                        if iter_ind % 300 == 0 and iter_ind > 0 and not valid_mode:
-                            # [TODO: with no_grad() and model.eval() ???]
-                            plotRepresentation(self.predStatesWithDataLoader(dataloader_test), rewards,
-                                               name="Learned State Representation (Training Data)",
-                                               fit_pca=False,
-                                               path=os.path.join(figdir_repr, "Iter_{}.png".format(
-                                                   epoch*n_batch_per_epoch+iter_ind)),
-                                               verbose=False)
-                        # Custom save losses
-                        # if not valid_mode:
-                        #     with open(os.path.join(self.log_folder, "loss_history.csv"), "a") as file:
-                        #         np.savetxt(file, np.array([train_loss, train_loss_D, train_loss_G,
-                        #                                    d_acc, g_acc]).reshape(1, -1))
+                            loss, history_message, epoch_loss_E, epoch_batches_E,epoch_loss_D,epoch_batches_D,epoch_loss_G,epoch_batches_G = self.module.model.train_on_batch(
+                                                                                    obs, next_obs,
+                                                                                    self.optimizer_D, self.optimizer_G, self.optimizer,
+                                                                                    loss_manager_D, loss_manager_G, loss_manager,
+                                                                                    epoch_batches_D, epoch_batches_G, epoch_batches_E,
+                                                                                    epoch_loss_D, epoch_loss_G, epoch_loss_E,
+                                                                                    d_acc, g_acc,
+                                                                                    batch_size=self.batch_size, 
+                                                                                    dataloader=dataloader,
+                                                                                    valid_mode=valid_mode,
+                                                                                    device=self.device)
+                            epoch_loss += loss
+                            epoch_batches += 1 ## update batch count
+                            if not valid_mode:
+                                # mean training loss so far. For gan, it's already the mean.
+                                train_loss = loss
+                                train_loss_D = epoch_loss_D / float(epoch_batches_D)
+                                train_loss_G = epoch_loss_G / float(epoch_batches_G)
+                                
+                                epoch_batches_E_train = epoch_batches_E
+                                epoch_batches_D_train = epoch_batches_D
+                                epoch_batches_G_train = epoch_batches_G
+                                
+                                
+                                
+                            else:
+                                # mean validation loss so far. For gan, it's already the mean.
+                                val_loss = loss
+                            # Custom/Optional plots: training too long, display/save img during training.
+                            if iter_ind % 20 == 0 and not valid_mode:
+                                if self.use_cgan:
+                                    reconstruct_obs = self.module.model.reconstruct(obs, action)
+                                else:
+                                    reconstruct_obs = self.module.model.reconstruct(obs)
+                                # , normalize=True, range=(0,1)
+                                images = make_grid([obs[0], reconstruct_obs[0], obs[1], reconstruct_obs[1]], nrow=2)
+                                plotImage(deNormalize(detachToNumpy(images)), mode='cv2',
+                                          save2dir=figdir_recon, index=(epoch*n_batch_per_epoch+iter_ind))
+                            if iter_ind % 300 == 0 and iter_ind > 0 and not valid_mode:
+                                # [TODO: with no_grad() and model.eval() ???]
+                                plotRepresentation(self.predStatesWithDataLoader(dataloader_test), rewards,
+                                                   name="Learned State Representation (Training Data)",
+                                                   fit_pca=False,
+                                                   path=os.path.join(figdir_repr, "Iter_{}.png".format(
+                                                       epoch*n_batch_per_epoch+iter_ind)),
+                                                   verbose=False)
                     # elif: ## ===========  add special srl model here. ===========
                     else:  # ============= Main update for usual srl model ====================
                         # Compute weighted average of losses of encoder part (including 'forward'/'inverse'/'reward' models)
@@ -665,9 +709,10 @@ class SRL4robotics(BaseLearner):
                         else: c = 0
                         
                         if self.use_cvae:
-                            action_cvae = one_hot(action).to(self.device)
-                            next_action_cvae = one_hot(next_action).to(self.device)
-                            loss = self.module.model.train_on_batch(obs, next_obs, action_cvae, next_action_cvae, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c )
+                            action = action.to(self.device)
+                            next_action = next_action.to(self.device)
+                            print("a ", action.size())
+                            loss = self.module.model.train_on_batch(obs, next_obs, action, next_action, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c )
                         elif self.use_vae:
                             loss = self.module.model.train_on_batch(obs, next_obs, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c)
                         else:
@@ -677,11 +722,9 @@ class SRL4robotics(BaseLearner):
                         epoch_batches += 1
                         if not valid_mode:
                             # mean training loss so far
-                            print('epoch_batch train: ', epoch_batches)
                             train_loss = epoch_loss / float(epoch_batches)
                         else:
                             # mean validation loss so far
-                            print('epoch_batch train: ', epoch_batches)
                             val_loss = epoch_loss / float(epoch_batches)
                     # Accuracy
                     if self.use_split:
@@ -752,23 +795,35 @@ class SRL4robotics(BaseLearner):
                     ep_cls_acc += cls_acc
                     
                     if valid_mode:
-                        val_rwd_acc = ep_rwd_acc / float(epoch_batches)
-                        val_inv_acc = ep_inv_acc / float(epoch_batches)
-                        val_cls_acc = ep_cls_acc / float(epoch_batches)
-                        val_acc = (val_rwd_acc + val_inv_acc + val_cls_acc) / 3.
-                        val_loss_str = "{:.4f}**".format(
-                            val_loss) if val_loss < best_error else "{:.4f}".format(val_loss)
-                        val_acc_str = "{:.4f}**".format(
-                            val_acc) if val_acc > best_acc else "{:.4f}".format(val_acc)
-
+                        if self.use_gan_new or self.use_cgan_new:
+                            val_loss_D_str =  "{:.4f}**".format(val_loss_D) if val_loss_D < best_error_D else "{:.4f}".format(val_loss_D)
+                            val_loss_G_str =  "{:.4f}**".format(val_loss_G) if val_loss_G < best_error_G else "{:.4f}".format(val_loss_G)
+                        else:
+                            val_rwd_acc = ep_rwd_acc / float(epoch_batches)
+                            val_inv_acc = ep_inv_acc / float(epoch_batches)
+                            val_cls_acc = ep_cls_acc / float(epoch_batches)
+                            val_acc = (val_rwd_acc + val_inv_acc + val_cls_acc) / 3.
+                            val_loss_str = "{:.4f}**".format(
+                                val_loss) if val_loss < best_error else "{:.4f}".format(val_loss)
+                            val_acc_str = "{:.4f}**".format(
+                                  val_acc) if val_acc > best_acc else "{:.4f}".format(val_acc)
+                        
                     if monitor_mode == 'loss':
                         if iter_ind % ITER_FLAG == 0 or (iter_ind == n_batch_per_epoch-1):
-                            if not valid_mode:
-                                print("\rEpoch {:3}/{}, {:.2%}, train_loss: {:.4f} rwd_acc: {:.2%} inv_acc: {:.2%} cls_acc: {:.2%}|supp: {}| (time: {:.2f}s)".format(
-                                    epoch + 1, N_EPOCHS, (iter_ind+1)/n_batch_per_epoch, train_loss, rwd_acc, inv_acc, cls_acc, history_message, time.time() - start_time), end="")
+                            if self.use_gan_new or self.use_cgan_new:
+                                if not valid_mode:
+                                    print("\rEpoch {:3}/{}, {:.2%}, train_loss_D: {:.4f} train_loss_G: {:.4f}|supp: {}| (time: {:.2f}s)".format(
+                                        epoch + 1, N_EPOCHS, (iter_ind+1)/n_batch_per_epoch, train_loss_D, train_loss_G , history_message, time.time() - start_time), end="")
+                                else:
+                                    print("\r-------(valid): {:.2%}, val_loss_D: {} val_loss_G: {}|supp: {}| (time: {:.2f}s)".format(
+                                        (iter_ind+1)/n_batch_per_epoch, '___', '___', history_message, time.time() - start_time), end="")
                             else:
-                                print("\r-------(valid): {:.2%}, val_loss: {} val_acc: {}|supp: {}| (time: {:.2f}s)".format(
-                                    (iter_ind+1)/n_batch_per_epoch, val_loss_str, val_acc_str, history_message, time.time() - start_time), end="")
+                                if not valid_mode:
+                                    print("\rEpoch {:3}/{}, {:.2%}, train_loss: {:.4f} rwd_acc: {:.2%} inv_acc: {:.2%} cls_acc: {:.2%}|supp: {}| (time: {:.2f}s)".format(
+                                        epoch + 1, N_EPOCHS, (iter_ind+1)/n_batch_per_epoch, train_loss, rwd_acc, inv_acc, cls_acc, history_message, time.time() - start_time), end="")
+                                else:
+                                    print("\r-------(valid): {:.2%}, val_loss: {} val_acc: {}|supp: {}| (time: {:.2f}s)".format(
+                                        (iter_ind+1)/n_batch_per_epoch, val_loss_str, val_acc_str, history_message, time.time() - start_time), end="")
                     elif monitor_mode == 'pbar':
                         pbar.update(1)
                 if valid_mode:
@@ -782,117 +837,131 @@ class SRL4robotics(BaseLearner):
                                                                        N_EPOCHS, (iter_ind+1)/n_batch_per_epoch, current_loss))
 
             # Even if loss_history is modified by LossManager
-            # we make it explicit ???
-            print('loss_history : ', loss_history)
-            print('train_loss ', train_loss)
-            print('val_loss ', val_loss)
-            print('epoch loss ', epoch_loss)
-            print('epoch_batches ', epoch_batches)
-            print('epoch ',epoch )
-
-            def update_loss_history(loss_manager, train_loss, val_loss, epoch_batches, epoch):
+            # we make it explicit ??
+            
+            def update_loss_history(loss_manager, train_loss,name_train_loss, val_loss, name_val_loss, epoch_batches, epoch):
                 loss_history = loss_manager.loss_history
-                loss_history['train_loss'].append(train_loss)
-                loss_history['val_loss'].append(val_loss)
+                loss_history[name_train_loss].append(train_loss)
+                loss_history[name_val_loss].append(val_loss)
                 for key in loss_history.keys():
-                    if key in ['train_loss', 'val_loss']:
+                    if key in [name_train_loss, name_val_loss]:
                         continue
-                    loss_history[key][-1] /= epoch_batches
+                    loss_history[key][-1] /= float(epoch_batches)
                     if epoch + 1 < N_EPOCHS:
                         loss_history[key].append(0)
                 return loss_history
-            loss_history = update_loss_history(loss_manager, train_loss, val_loss, epoch_batches, epoch)
-            print('loss_history after new update :', loss_history)
-            if self.use_gan and not valid_mode:
-                loss_history_D = update_loss_history(loss_manager_D, train_loss_D, 0, epoch_batches_D, epoch)
-                loss_history_G = update_loss_history(loss_manager_G, train_loss_G, 0, epoch_batches_G, epoch)
+
+            # if (self.use_gan or self.use_cgan) and not valid_mode:
+            if self.use_gan or self.use_cgan:      
+                loss_history = update_loss_history(loss_manager, train_loss,"train_loss_E", val_loss, "val_loss_E", epoch_batches_E_train, epoch)
+                loss_history_D = update_loss_history(loss_manager_D, train_loss_D,"train_loss_D", 0, "val_loss_D", epoch_batches_D_train, epoch)
+                loss_history_G = update_loss_history(loss_manager_G, train_loss_G,"train_loss_G", 0, "val_loss_G", epoch_batches_G_train, epoch)
+            elif self.use_gan_new or self.use_cgan_new:
+                loss_history_D = update_loss_history(loss_manager_D, train_loss_D,"train_loss_D", val_loss_D, "val_loss_D", len(dataloader_train), epoch)
+                loss_history_G = update_loss_history(loss_manager_G, train_loss_G,"train_loss_G", val_loss_G, "val_loss_G", len(dataloader_train), epoch)
+            else:
+                loss_history = update_loss_history(loss_manager, train_loss,"train_loss", val_loss, "val_loss", len(dataloader_train), epoch)
             # Save best model
-            if val_loss < best_error:  # TODO TODO TODO
-                best_error = val_loss
-                if not self.use_split:
-                    torch.save(self.module.state_dict(), best_model_path)  # save weight at each epoch !
-            if val_acc > best_acc:  # TODO TODO TODO
-                best_acc = val_acc
-                if not self.use_split:
-                    torch.save(self.module.state_dict(), best_model_path)  # save weight at each epoch !
-                # torch.save(self.module.state_dict(), best_model_path)
+            if self.use_gan_new or self.use_cgan_new:
+                torch.save(self.module.state_dict(), epoch_model_path)
+                if val_loss_D < best_error_D:  # TODO TODO TODO
+                    best_error_D = val_loss_D
+                    if not self.use_split:
+                        torch.save(self.module.state_dict(), best_model_path)  # save weight at each epoch !
+                if val_loss_G < best_error_G:  # TODO TODO TODO
+                    best_error_G = val_loss_G
+                    if not self.use_split:
+                        torch.save(self.module.state_dict(), best_model_path)  # save weight at each epoch !
+            else:   
+                if val_loss < best_error:  # TODO TODO TODO
+                    best_error = val_loss
+                    if not self.use_split:
+                        torch.save(self.module.state_dict(), best_model_path)  # save weight at each epoch !
+                if val_acc > best_acc:  # TODO TODO TODO
+                    best_acc = val_acc
+                    if not self.use_split:
+                        torch.save(self.module.state_dict(), best_model_path)  # save weight at each epoch !
+                    # torch.save(self.module.state_dict(), best_model_path)
+                if self.use_split:
+                    # save weight at each epoch ! # TODO TODO TODO TODO
+                    torch.save(self.module.state_dict(), best_model_path)
 
-            if self.use_split:
-                # save weight at each epoch ! # TODO TODO TODO TODO
-                torch.save(self.module.state_dict(), best_model_path)
+                if np.isnan(train_loss):
+                    printRed("NaN Loss, consider increasing NOISE_STD in the gaussian noise layer")
+                    sys.exit(NAN_ERROR)
+                # Then we print the results for this epoch:
+                if (epoch + 1) % EPOCH_FLAG == 0:
+                    if figdir is not None:
+                        self.module.eval()
+                        with torch.no_grad():
+                            # Optionally plot the current state space
+                            print("Predicting states for all the observations...")
+                            state_pred = self.predStatesWithDataLoader(dataloader_test)
+                            if self.use_reward2_loss and self.use_split:  # reward2 only compatible with split
+                                reward_pred, reward_gt = self.predRewardsWithDataLoader(dataloader_test2,
+                                                                                        state_index=state_index,
+                                                                                        split_dim_list=split_dim_list,
+                                                                                        reward_name='reward2')
+                                reward_gt = 1-reward_gt
+                                f1_a = np.sum(((reward_gt-reward_pred) == 0) * (reward_pred == 0))
+                                f1_b = np.sum(((reward_pred-reward_gt) == -1) * (reward_pred == 0))
+                                f1_c = np.sum(((reward_pred-reward_gt) != 0) * (reward_gt == 0))
+                                f1_score = 2*f1_a/(2*f1_a+f1_b+f1_c)
+                                recall = f1_a / (f1_a + f1_c)
+                            elif self.use_reward_loss:
+                                reward_pred, reward_gt = self.predRewardsWithDataLoader(dataloader_test2,
+                                                                                        state_index=state_index,
+                                                                                        split_dim_list=split_dim_list,
+                                                                                        reward_name='reward')
+                                f1_a = np.sum(((reward_gt-reward_pred) == 0) * (reward_pred == 1))
+                                f1_b = np.sum(((reward_pred-reward_gt) == 1) * (reward_pred == 1))
+                                f1_c = np.sum(((reward_pred-reward_gt) != 0) * (reward_gt == 1))
+                                f1_score = 2*f1_a/(2*f1_a+f1_b+f1_c)
+                                recall = f1_a / (f1_a + f1_c)
 
-            if np.isnan(train_loss):
-                printRed("NaN Loss, consider increasing NOISE_STD in the gaussian noise layer")
-                sys.exit(NAN_ERROR)
-            # Then we print the results for this epoch:
-            if (epoch + 1) % EPOCH_FLAG == 0:
-                if figdir is not None:
-                    self.module.eval()
-                    with torch.no_grad():
-                        # Optionally plot the current state space
-                        print("Predicting states for all the observations...")
-                        state_pred = self.predStatesWithDataLoader(dataloader_test)
-                        if self.use_reward2_loss and self.use_split:  # reward2 only compatible with split
-                            reward_pred, reward_gt = self.predRewardsWithDataLoader(dataloader_test2,
-                                                                                    state_index=state_index,
-                                                                                    split_dim_list=split_dim_list,
-                                                                                    reward_name='reward2')
-                            reward_gt = 1-reward_gt
-                            f1_a = np.sum(((reward_gt-reward_pred) == 0) * (reward_pred == 0))
-                            f1_b = np.sum(((reward_pred-reward_gt) == -1) * (reward_pred == 0))
-                            f1_c = np.sum(((reward_pred-reward_gt) != 0) * (reward_gt == 0))
-                            f1_score = 2*f1_a/(2*f1_a+f1_b+f1_c)
-                            recall = f1_a / (f1_a + f1_c)
-                        elif self.use_reward_loss:
-                            reward_pred, reward_gt = self.predRewardsWithDataLoader(dataloader_test2,
-                                                                                    state_index=state_index,
-                                                                                    split_dim_list=split_dim_list,
-                                                                                    reward_name='reward')
-                            f1_a = np.sum(((reward_gt-reward_pred) == 0) * (reward_pred == 1))
-                            f1_b = np.sum(((reward_pred-reward_gt) == 1) * (reward_pred == 1))
-                            f1_c = np.sum(((reward_pred-reward_gt) != 0) * (reward_gt == 1))
-                            f1_score = 2*f1_a/(2*f1_a+f1_b+f1_c)
-                            recall = f1_a / (f1_a + f1_c)
-
-                        plotRepresentation(state_pred, rewards,
-                                           #    add_colorbar=epoch == 0,
-                                           fit_pca=False,
-                                           name="Learned State Representation (Training Data)",
-                                           path=os.path.join(figdir_repr, "Epoch_{}.png".format(epoch+1)))
-                        printGTC(state_pred, ground_truth, target_positions, truncate=truncate)
-                        if self.use_autoencoder or self.use_vae or self.use_cvae or self.use_dae or self.use_gan:
-                            # Plot Reconstructed Image
-                            if obs[0].shape[0] == 3:  # RGB
-                                if self.use_cvae:
-                                    reconstruct_obs = self.module.model.reconstruct(obs, action_cvae)
-                                else:
-                                    reconstruct_obs = self.module.model.reconstruct(obs)
-                                # , normalize=True, range=(0,1)
-                                images = make_grid([obs[0], reconstruct_obs[0], obs[1], reconstruct_obs[1]], nrow=2)
-                                plotImage(deNormalize(detachToNumpy(images)), mode='cv2',
-                                          save2dir=figdir_recon, index=epoch+1)
-                    if (self.use_reward2_loss and self.use_split) or self.use_reward_loss:
-                        if f1_score > best_f1:
-                            best_f1 = f1_score
-                            # torch.save(self.module.state_dict(), best_model_path) # TODO TODO TODO TODO
-                            f1_score_str = "{:.4f}***".format(f1_score)
-                        else:
-                            f1_score_str = "{:.4f}".format(f1_score)
-                        print("F1 score: {}; Recall: {:.4f}".format(f1_score_str, recall))
+                            plotRepresentation(state_pred, rewards,
+                                               #    add_colorbar=epoch == 0,
+                                               fit_pca=False,
+                                               name="Learned State Representation (Training Data)",
+                                               path=os.path.join(figdir_repr, "Epoch_{}.png".format(epoch+1)))
+                            printGTC(state_pred, ground_truth, target_positions, truncate=truncate)
+                            if self.use_autoencoder or self.use_vae or self.use_cvae or self.use_dae or self.use_gan or self.use_cgan:
+                                # Plot Reconstructed Image
+                                if obs[0].shape[0] == 3:  # RGB
+                                    if self.use_cvae or self.use_cgan:
+                                        reconstruct_obs = self.module.model.reconstruct(obs, action.to(self.device))
+                                    else:
+                                        reconstruct_obs = self.module.model.reconstruct(obs)
+                                    # , normalize=True, range=(0,1)
+                                    images = make_grid([obs[0], reconstruct_obs[0], obs[1], reconstruct_obs[1]], nrow=2)
+                                    plotImage(deNormalize(detachToNumpy(images)), mode='cv2',
+                                              save2dir=figdir_recon, index=epoch+1)
+                        if (self.use_reward2_loss and self.use_split) or self.use_reward_loss:
+                            if f1_score > best_f1:
+                                best_f1 = f1_score
+                                # torch.save(self.module.state_dict(), best_model_path) # TODO TODO TODO TODO
+                                f1_score_str = "{:.4f}***".format(f1_score)
+                            else:
+                                f1_score_str = "{:.4f}".format(f1_score)
+                            print("F1 score: {}; Recall: {:.4f}".format(f1_score_str, recall))
             print("======================================================================================================================================")
-
+        
         # Load best model before predicting states
         self.module.load_state_dict(torch.load(best_model_path))
-
-        print("Predicting states for all the observations...")
-        # return predicted states for training observations
-        self.module.eval()
-        with torch.no_grad():
-            pred_states = self.predStatesWithDataLoader(dataloader_test)
-        pairs_loss_weight = [k for k in zip(loss_manager.names, loss_manager.weights)]
-        if self.use_gan:
-            pairs_loss_weight += [k for k in zip(loss_manager_D.names, loss_manager_D.weights)]
+        if not self.use_gan_new and not self.use_cgan_new:
+            print("Predicting states for all the observations...")
+            # return predicted states for training observations
+            self.module.eval()
+            with torch.no_grad():
+                pred_states = self.predStatesWithDataLoader(dataloader_test)
+            pairs_loss_weight = [k for k in zip(loss_manager.names, loss_manager.weights)]
+            if self.use_gan or self.use_cgan :
+                pairs_loss_weight += [k for k in zip(loss_manager_D.names, loss_manager_D.weights)]
+                pairs_loss_weight += [k for k in zip(loss_manager_G.names, loss_manager_G.weights)]
+                loss_history = [loss_history, loss_history_D, loss_history_G]
+        else: 
+            pairs_loss_weight = [k for k in zip(loss_manager_D.names, loss_manager_D.weights)]
             pairs_loss_weight += [k for k in zip(loss_manager_G.names, loss_manager_G.weights)]
-            # [Warning: the following line requires python >= 3.5]
-            loss_history = {**loss_history, **loss_history_D, **loss_history_G}
+            loss_history = [loss_history_D, loss_history_G]
+            pred_states = None
         return loss_history, pred_states, pairs_loss_weight

@@ -13,7 +13,8 @@ class BaseTrainer(nn.Module):
         raise NotImplementedError
 
     def update_nn_weights(self, optimizer, loss_manager, valid_mode=False):
-        loss_manager.updateLossHistory()
+        if not valid_mode:
+            loss_manager.updateLossHistory()
         loss = loss_manager.computeTotalLoss()
         if not valid_mode:
             loss.backward()

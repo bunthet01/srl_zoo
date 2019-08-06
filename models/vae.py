@@ -111,8 +111,9 @@ class VAETrainer(nn.Module):
             self.model.compute_tensors(next_obs)
         # states, next_states = self.model(obs), self.model(next_obs)
         kullbackLeiblerLoss(mu, next_mu, logvar, next_logvar, loss_manager, beta, c)
-        generationLoss(decoded_obs, next_decoded_obs, obs, next_obs, weight=1, loss_manager=loss_manager) #0.5e-6
-        loss_manager.updateLossHistory()
+        generationLoss(decoded_obs, next_decoded_obs, obs, next_obs,weight=1, loss_manager=loss_manager) #0.5e-6
+        if not valid_mode:
+            loss_manager.updateLossHistory()
         loss = loss_manager.computeTotalLoss()
         if not valid_mode:
             loss.backward()

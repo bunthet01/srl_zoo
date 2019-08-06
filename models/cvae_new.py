@@ -10,12 +10,10 @@ try:
     # relative import: when executing as a package: python -m ...
     from .base_models import BaseModelVAE
     from ..losses.losses import kullbackLeiblerLoss, generationLoss
-    from ..preprocessing.utils import one_hot
 except:
     # absolute import: when executing directly: python train.py ...
     from models.base_models import BaseModelVAE
     from losses.losses import kullbackLeiblerLoss, generationLoss, KLDloss, BCEloss
-    from preprocessing.utils import one_hot
 
 class DenseCVAE(BaseModelVAE):
     """
@@ -24,13 +22,12 @@ class DenseCVAE(BaseModelVAE):
     :param img_shape: (tuple)
     """
 
-    def __init__(self, state_dim, class_dim, img_shape,device):
+    def __init__(self, state_dim, class_dim, img_shape):
         super(DenseCVAE, self).__init__(state_dim=state_dim, img_shape=img_shape)
 
         self.img_shape = img_shape
         self.class_dim = class_dim
         self.state_dim = state_dim
-        self.device = device
 
         self.encoder_fc1 = nn.Linear(np.prod(self.img_shape)+class_dim, 50)
         self.encoder_fc21 = nn.Linear(50, state_dim)
@@ -51,12 +48,12 @@ class DenseCVAE(BaseModelVAE):
     def encode_cvae(self, x, c):
         # Flatten input
         x = x.view(x.size(0), -1)
-        concat_input = th.cat([x, one_hot(c).to(self.device)], 1)
+        concat_input = th.cat([x, c], 1)
         concat_input = self.relu(self.encoder_fc1(concat_input))
         return self.encoder_fc21(concat_input), self.encoder_fc22(concat_input)
 
     def decode_cvae(self, z, c):
-        concat_input = th.cat([z, one_hot(c).to(self.device)], 1)
+        concat_input = th.cat([z, c], 1)
         return self.decoder(concat_input).view(-1, self.img_shape[0], self.img_shape[1], self.img_shape[2] )
     
     def compute_tensor_cvae(self, x, c):
@@ -78,12 +75,11 @@ class CNNCVAE(BaseModelVAE):
     Convolutional neural network for Conditional variational auto-encoder
 
     """
-    def __init__(self, state_dim=3,class_dim=1, img_shape=(3, 224, 224),device='cpu'):
+    def __init__(self, state_dim=3,class_dim=1, img_shape=(3, 224, 224)):
         super(CNNCVAE, self).__init__(state_dim=state_dim, img_shape=img_shape)
         outshape = summary(self.encoder_conv, img_shape, show=False)  # [-1, channels, high, width]
         self.img_height, self.img_width = outshape[-2:]
         self.class_dim =  class_dim
-        self.device = device
         self.encoder_fc1 = nn.Linear(self.img_height * self.img_width * 64+self.class_dim, state_dim)
         self.encoder_fc2 = nn.Linear(self.img_height * self.img_width * 64+self.class_dim, state_dim)
         self.decoder_fc = nn.Sequential(
@@ -99,7 +95,7 @@ class CNNCVAE(BaseModelVAE):
         
         x = self.encoder_conv(x)
         x_vector = x.view(x.size(0), -1)
-        concat_input = th.cat([x_vector, one_hot(c).to(self.device)], 1)
+        concat_input = th.cat([x_vector, c], 1)
         return self.encoder_fc1(concat_input), self.encoder_fc2(concat_input)
 
     def decode_cvae(self, z, c):
@@ -108,7 +104,7 @@ class CNNCVAE(BaseModelVAE):
         :param c: (th.Tensor)
         :return: (th.Tensor)
         """
-        concat_input = th.cat([z, one_hot(c).to(self.device)], 1)
+        concat_input = th.cat([z, c], 1)
         out_put_1 = self.decoder_fc(concat_input)
         out_put_2 = out_put_1.view(out_put_1.size(0), 64,self.img_height, self.img_width)
         return self.decoder_conv(out_put_2)
@@ -125,114 +121,21 @@ class CNNCVAE(BaseModelVAE):
         decoded = self.decode_cvae(z, c).view(input_shape)
         return decoded, mu, logvar
         
-class CNNCVAE_NEW(BaseModelVAE):
-    """
-    Convolutional neural network for Conditional variational auto-encoder
-
-    """
-    def __init__(self, state_dim=3,class_dim=1, img_shape=(3, 224, 224), device='cpu'):
-        super(CNNCVAE_NEW, self).__init__(state_dim=state_dim, img_shape=img_shape)
-        outshape = summary(self.encoder_conv, img_shape, show=False)  # [-1, channels, high, width]
-        self.img_height, self.img_width = outshape[-2:]
-        self.class_dim =  class_dim
-        self.device = device
-        self.encoder_fc1 = nn.Linear(self.img_height * self.img_width * 64, state_dim)
-        self.encoder_fc2 = nn.Linear(self.img_height * self.img_width * 64, state_dim)
-        self.decoder_fc = nn.Sequential(
-            nn.Linear(state_dim+self.class_dim, self.img_height * self.img_width * 64)
-            )
-        #########
-        def conv3x3(in_planes, out_planes, stride=1):
-            """"
-            From PyTorch Resnet implementation
-            3x3 convolution with padding
-            :param in_planes: (int)
-            :param out_planes: (int)
-            :param stride: (int)
-            """
-            return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
-                             padding=1, bias=False)
-        self.one_hot = th.zeros(self.class_dim, self.class_dim)
-        self.one_hot = self.one_hot.scatter(1, th.arange(self.class_dim).type(th.LongTensor).view(self.class_dim,1), 1).view(self.class_dim, self.class_dim, 1, 1)
-        self.fill = th.zeros([self.class_dim, self.class_dim, self.img_shape[1], self.img_shape[2]])
-        for i in range(self.class_dim):
-            self.fill[i, i, :, :] = 1
-            
-        self.encoder_conv_new = nn.Sequential(
-            # 224x224xN_CHANNELS -> 112x112x64
-            nn.Conv2d(self.img_shape[0]+self.class_dim, 64, kernel_size=7, stride=2, padding=3, bias=False),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 56x56x64
-
-            conv3x3(in_planes=64, out_planes=64, stride=1),  # 56x56x64
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=3, stride=2),  # 27x27x64
-
-            conv3x3(in_planes=64, out_planes=64, stride=2),  # 14x14x64
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.MaxPool2d(kernel_size=3, stride=2)  # 6x6x64
-        )
-        #########
-    def encode_cvae(self, x, c):
-        """
-        :param x: (th.Tensor)
-        :param c: (th.Tensor)
-        :return: (th.Tensor)
-
-        """
-        print("0 :", c.size())
-        c = self.fill[c.long()].to(self.device)
-        print("1 :", x.size())
-        print("2 :", c.size())
-        x = th.cat([x,c], 1)
-        x = self.encoder_conv_new(x)
-        x = x.view(x.size(0), -1)
-        return self.encoder_fc1(x), self.encoder_fc2(x)
-
-    def decode_cvae(self, z, c):
-        """
-        :param z: (th.Tensor)
-        :param c: (th.Tensor)
-        :return: (th.Tensor)
-        """
-        concat_input = th.cat([z, one_hot(c).to(self.device)], 1)
-        out_put_1 = self.decoder_fc(concat_input)
-        out_put_2 = out_put_1.view(out_put_1.size(0), 64,self.img_height, self.img_width)
-        return self.decoder_conv(out_put_2)
-
-    def compute_tensor_cvae(self, x, c):
-        """
-        :param x: (th.Tensor)
-        :param c: (th.Tensor)
-        :return: (th.Tensor)
-        """
-        input_shape = x.size()
-        mu, logvar = self.encode_cvae(x, c)
-        z = self.reparameterize(mu, logvar)
-        decoded = self.decode_cvae(z, c).view(input_shape)
-        return decoded, mu, logvar
-
 
 class CVAETrainer(nn.Module):
-    def __init__(self, state_dim=2, class_dim=1, img_shape=(3, 224, 224),device='cpu'):
+    def __init__(self, state_dim=2, class_dim=1, img_shape=(3, 224, 224)):
         super().__init__()
         self.state_dim = state_dim
         self.img_shape = img_shape
         self.class_dim = class_dim
-        self.device = device
 
     def build_model(self, model_type='custom_cnn'):
-        assert model_type in ['custom_cnn','custom_cnn_2', 'linear', 'mlp'], 'The model must be one of [custom_cn, linear, mlp] '
+        assert model_type in ['custom_cnn', 'linear', 'mlp'], 'The model must be one of [custom_cn, linear, mlp] '
         self.model_type = model_type
         if model_type == 'custom_cnn':
-            self.model = CNNCVAE(self.state_dim,self.class_dim, self.img_shape, self.device)
-        elif model_type == 'custom_cnn_2':
-            self.model = CNNCVAE_NEW(self.state_dim,self.class_dim, self.img_shape, self.device)
+            self.model = CNNCVAE(self.state_dim,self.class_dim, self.img_shape)
         elif model_type == 'mlp':
-            self.model = DenseCVAE(self.state_dim, self.class_dim, self.img_shape, self.device)
+            self.model = DenseCVAE(self.state_dim, self.class_dim, self.img_shape)
         else:
             raise NotImplementedError(
                 "model type: ({}) not supported yet.".format(model_type))

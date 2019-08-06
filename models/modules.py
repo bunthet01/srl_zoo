@@ -4,7 +4,10 @@ from .cvae import CVAETrainer
 from .forward_inverse import BaseForwardModel, BaseInverseModel, BaseRewardModel, BaseRewardModel2, BasicTrainer, SelfSupClassfier
 from .priors import SRLConvolutionalNetwork, SRLDenseNetwork, SRLLinear
 from .triplet import EmbeddingNet
-from .gan import GANTrainer  # Generator, Discriminator, Encoder, UNet,
+from .gan import GANTrainer  
+from .gan_new import GanNewTrainer
+from .cgan_new import CGanNewTrainer
+from .cgan import CGANTrainer 
 import torch
 from collections import OrderedDict
 try:
@@ -21,7 +24,7 @@ except:
 
 class SRLModules(BaseForwardModel, BaseInverseModel, BaseRewardModel, BaseRewardModel2, SelfSupClassfier):
     def __init__(self, state_dim=2,cuda=False, class_dim=1,img_shape=None, action_dim=6, model_type="custom_cnn", losses=None,
-                 split_dimensions=None, n_hidden_reward=16, inverse_model_type="linear"):
+                 split_dimensions=None, n_hidden_reward=16, inverse_model_type="linear", device='cpu'):
         """
         A model that can combine AE/VAE + Inverse + Forward + Reward models
         :param state_dim: (int)
@@ -85,8 +88,18 @@ class SRLModules(BaseForwardModel, BaseInverseModel, BaseRewardModel, BaseReward
             self.model.build_model(model_type=model_type)
         elif 'gan' in losses:
             self.model = GANTrainer(state_dim=state_dim, img_shape=self.img_shape)
+            self.model.build_model(model_type=model_type)
+        elif 'gan_new' in losses:
+	        self.model = GanNewTrainer( state_dim, self.img_shape)
+	        self.model.build_model(model_type=model_type)
+        elif 'cgan' in losses:
+            self.model = CGANTrainer(state_dim=state_dim,label_dim=class_dim, img_shape=self.img_shape, device=device)
+            self.model.build_model(model_type=model_type)
+        elif 'cgan_new' in losses:
+            self.model = CGanNewTrainer(state_dim=state_dim,label_dim=class_dim, img_shape=self.img_shape)
+            self.model.build_model(model_type=model_type)
         elif "cvae" in losses:
-            self.model = CVAETrainer(state_dim=state_dim, class_dim=class_dim, img_shape=img_shape)
+            self.model = CVAETrainer(state_dim=state_dim, class_dim=class_dim, img_shape=img_shape, device=device)
             self.model.build_model(model_type=model_type)
             
 

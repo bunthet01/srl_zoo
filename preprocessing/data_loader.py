@@ -363,18 +363,18 @@ class DataLoader(object):
             self.process.terminate()
 
 
-class DataLoaderCVAE(object):
+class DataLoaderConditional(object):
     def __init__(self, minibatchlist,actions_unnormalize, generative_model_state_dim, seed, max_queue_len=4, infinite_loop=True):
         """
-        A Custom dataloader preparing data to forward to CVAE model   
+        A Custom dataloader preparing data to forward to Conditional model   
         :param n_workers: (int) number of preprocessing worker (load and preprocess each image)
         :param max_queue_len: (int) Max number of minibatches that can be preprocessed at the same time
         :param infinite_loop: (bool) whether to have an iterator that can be resetted
         :param generative_model_state_dim:([np.array]) The dimension of the latent variable in generative model  
-        :param actions_unnormalize : ([np.array]) The actions used to generate observations with CVAE
+        :param actions_unnormalize : ([np.array]) The actions used to generate observations with Conditional Model
         :param seed :(int) random seed used to generated latent variable
         """
-        super(DataLoaderCVAE, self).__init__()
+        super(DataLoaderConditional, self).__init__()
         self.minibatchlist = minibatchlist
         self.seed = seed
         self.actions_unnormalize = actions_unnormalize
@@ -644,7 +644,9 @@ class RobotEnvDataset(torch.utils.data.Dataset):
                 img = self._get_one_img(image_path)
                 img_next = self._get_one_img(self.images_path[index+1])
                 reward = self.rewards[index]
-                return img.astype(self.dtype), img_next.astype(self.dtype), reward      
+                action = self.actions[index]
+                next_action = self.actions[index+1]
+                return img.astype(self.dtype), img_next.astype(self.dtype), reward,action, next_action      
             else:
                 return
 

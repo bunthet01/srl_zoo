@@ -19,6 +19,7 @@ from pipeline import getLogFolderName, saveConfig, correlationCall
 from plotting.losses_plot import plotLosses
 from plotting.representation_plot import plotRepresentation
 from utils import parseDataFolder, createFolder, getInputBuiltin, loadData, buildConfig, parseLossArguments
+from collections import defaultdict
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='State Representation Learning with PyTorch')
@@ -45,7 +46,7 @@ if __name__ == '__main__':
     parser.add_argument('--no-display-plots', action='store_true', default=False,
                         help='disables live plots of the representation learned')
     parser.add_argument('--model-type', type=str, default="custom_cnn",
-                        choices=['custom_cnn', 'resnet', 'mlp', 'linear', 'gan', 'unet'],
+                        choices=['custom_cnn', 'custom_cnn_2', 'resnet', 'mlp', 'linear', 'gan', 'unet','dc'],
                         help='Model architecture (default: "custom_cnn")')
     parser.add_argument('--inverse-model-type', type=str, default="linear",
                         choices=['mlp', 'linear'],
@@ -61,7 +62,7 @@ if __name__ == '__main__':
                         help='Force balanced sampling for episode independent prior instead of uniform')
     parser.add_argument('--losses', nargs='+', default=[], **parseLossArguments(
         choices=["forward", "inverse", "reward", "reward2", "spcls", "priors", "episode-prior", "reward-prior", "triplet",
-                 "autoencoder", "vae","cvae", "perceptual", "dae", "random", "gan"],
+                 "autoencoder", "vae","cvae", "perceptual", "dae", "random", "gan","cgan", "gan_new", "cgan_new"],
         help='The wanted losses. One may also want to specify a weight and dimension '
              'that apply as follows: "<name>:<weight>:<dimension>".'))
     parser.add_argument('--beta', type=float, default=1.0,
@@ -196,6 +197,8 @@ if __name__ == '__main__':
     exp_config['img_shape'] = args.img_shape
     exp_config['use_cci'] = args.use_cci
     exp_config['Cmax'] = args.Cmax
+    exp_config['learning_rate_D'] = args.learning_rate_D
+    exp_config['learning_rate_G'] = args.learning_rate_G
 
     if "dae" in losses:
         exp_config['occlusion-percentage'] = args.occlusion_percentage
@@ -234,19 +237,32 @@ if __name__ == '__main__':
     exp_config['losses_weights'] = pairs_name_weights
     saveConfig(exp_config, print_config=True)
 
-    # Save plot
-    plotLosses(loss_history, args.log_folder)
-    srl.saveStates(learned_states, images_path, rewards, args.log_folder)
-    # Save losses losses history
+    if learned_states is not None:
+        print("learned_states.shape ", learned_states.shape)
+        srl.saveStates(learned_states, images_path, rewards, args.log_folder)
+        name = "Learned State Representation\n {}".format(args.log_folder.split('/')[-1])
+        path = "{}/learned_states.png".format(args.log_folder)
+
+        # PLOT REPRESENTATION & CORRELATION
+        plotRepresentation(learned_states, rewards, name, add_colorbar=True, path=path)
+        correlationCall(exp_config, plot=not args.no_display_plots)
+
+    if "gan" in losses or "cgan" in losses:
+        # Save plot
+        plotLosses(loss_history[0], path=args.log_folder, name="Autoencoder_losses")       
+        plotLosses(loss_history[1], path=args.log_folder, name="Dicriminator_losses")
+        plotLosses(loss_history[2], path=args.log_folder, name="Generator_losses")
+    
+        loss_history = {**loss_history[0],**loss_history[1],**loss_history[2]} 
+    elif "gan_new" in losses or "cgan_new" in losses:
+        # Save plot    
+        plotLosses(loss_history[0], path=args.log_folder, name="Dicriminator_losses")
+        plotLosses(loss_history[1], path=args.log_folder, name="Generator_losses")
+    
+        loss_history = {**loss_history[0],**loss_history[1]} 
+    else:
+        plotLosses(loss_history, args.log_folder)
     np.savez('{}/loss_history.npz'.format(args.log_folder), **loss_history)
+    
 
-    name = "Learned State Representation\n {}".format(args.log_folder.split('/')[-1])
-    path = "{}/learned_states.png".format(args.log_folder)
-
-    # PLOT REPRESENTATION & CORRELATION
-    plotRepresentation(learned_states, rewards, name, add_colorbar=True, path=path)
-    correlationCall(exp_config, plot=not args.no_display_plots)
-
-    # Do not close plot at the end of training
-    # if learner.SAVE_PLOTS:
-    #     getInputBuiltin()('\nPress any key to exit.')
+    

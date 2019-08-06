@@ -11,14 +11,14 @@ import numpy as np
 sns.set()
 
 
-def plotLosses(loss_history, path=None):
+def plotLosses(loss_history, path=None, name="Losses"):
     """
     :param loss_history: (dict)
     :param path: (str)
     """
     keys = list(loss_history.keys())
     keys.sort()
-    plt.figure("Losses")
+    plt.figure(name)
     for key in keys:
         # check if the loss was averaged by epoch or not yet
         if isinstance(loss_history[key], np.ndarray) and len(loss_history[key].shape) > 1:
@@ -33,7 +33,7 @@ def plotLosses(loss_history, path=None):
     plt.legend(loc='upper right')
     plt.title("Evolution of the losses")
     if path is not None:
-        plt.savefig(path + "/losses.png")
+        plt.savefig(path +"/"+ name+".png")
     else:
         plt.show()
 
