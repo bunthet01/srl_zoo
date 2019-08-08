@@ -96,7 +96,7 @@ class SRLModules(BaseForwardModel, BaseInverseModel, BaseRewardModel, BaseReward
             self.model = CGANTrainer(state_dim=state_dim,label_dim=class_dim, img_shape=self.img_shape, device=device)
             self.model.build_model(model_type=model_type)
         elif 'cgan_new' in losses:
-            self.model = CGanNewTrainer(state_dim=state_dim,label_dim=class_dim, img_shape=self.img_shape)
+            self.model = CGanNewTrainer(state_dim=state_dim,label_dim=class_dim, img_shape=self.img_shape, device=device)
             self.model.build_model(model_type=model_type)
         elif "cvae" in losses:
             self.model = CVAETrainer(state_dim=state_dim, class_dim=class_dim, img_shape=img_shape, device=device)

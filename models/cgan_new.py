@@ -14,6 +14,134 @@ except:
     from losses.losses import ganNonSaturateLoss, autoEncoderLoss, ganBCEaccuracy, AEboundLoss
 from torchsummary import summary
 
+class GeneratorUnet(nn.Module):
+    def __init__(self, state_dim, img_shape, label_dim,
+                 unet_depth=2,  # 3
+                 unet_ch=16,  # 32
+                 spectral_norm=False, device='cpu',
+                 unet_bn=False,
+                 unet_drop=0.0):
+        super().__init__()
+        self.state_dim = state_dim
+        self.img_shape = img_shape
+        self.device = device
+        self.label_dim = label_dim
+        self.spectral_norm = spectral_norm
+        self.unet_depth = unet_depth
+        self.unet_ch = unet_ch
+        self.unet_drop = unet_drop
+        self.unet_bn = unet_bn
+        # self.lipschitz_G = 1.1 [TODO]
+        assert self.img_shape[0] < 10, "Pytorch uses 'channel first' convention."
+        if self.spectral_norm:
+            # state_layer = DenseSN(np.prod(self.img_shape), activation=None, lipschitz=self.lipschitz_G)(state_input)
+            self.first = LinearSN(
+                self.state_dim + self.label_dim, np.prod(self.img_shape), bias=True)
+        else:
+            self.first = nn.Linear(
+                self.state_dim + self.label_dim, np.prod(self.img_shape), bias=True)
+
+            # state_layer = Dense(np.prod(self.img_shape), activation=None)(state_input)
+        self.activations = nn.ModuleDict([
+            ['lrelu', nn.LeakyReLU(negative_slope=0.2)],
+            ['prelu', nn.PReLU()],
+            ['tanh', nn.Tanh()],
+            ['relu', nn.ReLU()]
+        ])
+
+        out_channels = self.img_shape[0]  # = 3
+        in_channels = out_channels
+        self.unet = UNet(in_ch=in_channels, include_top=False, depth=self.unet_depth, start_ch=self.unet_ch,
+                         batch_norm=self.unet_bn, spec_norm=self.spectral_norm, dropout=self.unet_drop,
+                         up_mode='upconv', out_ch=out_channels)
+        prev_channels = self.unet.out_ch
+        if self.spectral_norm:
+            self.last = ConvSN2d(prev_channels, out_channels,
+                                 kernel_size=3, stride=1, padding=1)
+        else:
+            self.last = nn.Conv2d(
+                prev_channels, out_channels, kernel_size=3, stride=1, padding=1)
+
+    def forward_cgan(self, x, l):
+        x = torch.cat([x, one_hot(l).to(self.device)], 1)
+        x = self.first(x)
+        x = self.activations['lrelu'](x)
+        x = x.view(x.size(0), *self.img_shape)
+        x = self.unet(x)
+        x = self.last(x)
+        x = self.activations['tanh'](x)
+        return x
+
+
+class GeneratorResNet(BaseModelSRL):
+    """
+    ResNet Generator
+    """
+
+    def __init__(self, state_dim, img_shape, label_dim, in_shape, spectral_norm=False, device='cpu'):
+        super().__init__(state_dim=state_dim, img_shape=img_shape)
+        assert img_shape[0] < 10, "Pytorch uses 'channel first' convention."
+        self.state_dim = state_dim
+        self.in_shape = in_shape
+        self.img_shape = img_shape
+        self.device = device
+        self.label_dim = label_dim
+        self.spectral_norm = spectral_norm
+
+        _, self.in_height, self.in_width = self.in_shape  ## [channel, high, width]
+
+        self.decoder_fc = nn.Sequential(
+            nn.Linear(state_dim + label_dim, self.in_height * self.in_width * 64)
+        )
+        if self.spectral_norm:
+            self.decoder_conv = nn.Sequential(
+                ConvTransposeSN2d(64, 64, kernel_size=3, stride=2),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+
+                ConvTransposeSN2d(64, 64, kernel_size=3, stride=2),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+
+                ConvTransposeSN2d(64, 64, kernel_size=3, stride=2),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+
+                ConvTransposeSN2d(64, 64, kernel_size=3, stride=2),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+
+                ConvTransposeSN2d(64, self.img_shape[0], kernel_size=4, stride=2),
+                nn.Tanh()
+            )
+
+        else:
+            self.decoder_conv = nn.Sequential(
+                nn.ConvTranspose2d(64, 64, kernel_size=3, stride=2),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+
+                nn.ConvTranspose2d(64, 64, kernel_size=3, stride=2),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+
+                nn.ConvTranspose2d(64, 64, kernel_size=3, stride=2),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+
+                nn.ConvTranspose2d(64, 64, kernel_size=3, stride=2),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+
+                nn.ConvTranspose2d(64, self.img_shape[0], kernel_size=4, stride=2),
+                nn.Tanh()
+            )
+
+    def forward_cgan(self, x, l):
+        decoded = torch.cat([x, one_hot(l).to(self.device)], 1)
+        decoded = self.decoder_fc(decoded)
+        decoded = decoded.view(x.size(0), 64, self.in_height, self.in_width)
+        return self.decoder_conv(decoded)
 class Discriminator(nn.Module):
     def __init__(self, state_dim, img_shape,label_dim,
                  spectral_norm=False,device='cpu',
@@ -95,6 +223,7 @@ class Discriminator(nn.Module):
         x = self.last(x)
         x = self.activations['sigmoid'](x)
         return x
+
 # The DiscriminatorDC and GeneratorDC is inspired by https://github.com/pytorch/examples/tree/master/dcgan
 class DiscriminatorDC(nn.Module):
     def __init__(self, state_dim, label_dim, img_shape,spectral_norm=False):
@@ -245,11 +374,12 @@ class GeneratorDC(nn.Module):
         
 
 class CGanNewTrainer(BaseTrainer):
-    def __init__(self, state_dim, label_dim, img_shape):
+    def __init__(self, state_dim, label_dim, img_shape,device):
         super().__init__()
         self.state_dim = state_dim
         self.img_shape = img_shape
         self.label_dim = label_dim
+        self.device = device
         self.one_hot = torch.zeros(self.label_dim, self.label_dim)
         self.one_hot = self.one_hot.scatter(1, torch.arange(self.label_dim).type(torch.LongTensor).view(self.label_dim,1), 1).view(self.label_dim, self.label_dim, 1, 1)
         self.fill = torch.zeros([self.label_dim, self.label_dim, self.img_shape[1], self.img_shape[2]])
@@ -263,16 +393,27 @@ class CGanNewTrainer(BaseTrainer):
         elif classname.find('BatchNorm2d') != -1:
             torch.nn.init.normal_(m.weight.data, 1.0, 0.02)
             torch.nn.init.constant_(m.bias.data, 0.0)
-        
-
     
     def build_model(self, model_type='dc'):
-        assert model_type in ['custom_cnn', 'linear', 'mlp']
-        self.generator = GeneratorDC(self.state_dim, self.label_dim, self.img_shape, spectral_norm=False)
-        self.discriminator = DiscriminatorDC(self.state_dim, self.label_dim, self.img_shape, spectral_norm=True)
-        
-        self.generator.apply(self.weights_init)
-        self.discriminator.apply(self.weights_init)
+        assert model_type in ['custom_cnn', 'unet', 'dc']
+        if model_type == "dc":
+            self.generator = GeneratorDC(self.state_dim, self.label_dim, self.img_shape, spectral_norm=False)
+            self.discriminator = DiscriminatorDC(self.state_dim, self.label_dim, self.img_shape, spectral_norm=True)
+
+            self.generator.apply(self.weights_init)
+            self.discriminator.apply(self.weights_init)
+        elif model_type == "unet":
+            self.generator = GeneratorUnet(self.state_dim, self.img_shape, self.label_dim, spectral_norm=True,
+                                           device=self.device)
+            self.discriminator = Discriminator(self.state_dim, self.img_shape, self.label_dim, spectral_norm=True,
+                                               device=self.device)
+        elif model_type == "custom_cnn":
+            self.generator = GeneratorResNet(self.state_dim, self.img_shape, self.label_dim,
+                                             spectral_norm=True, device=self.device)
+            self.discriminator = Discriminator(self.state_dim, self.img_shape, self.label_dim, spectral_norm=True,
+                                               device=self.device)
+        else:
+            raise NotImplementedError
         
     def BCEloss(self,output, label, loss_manager, weight, name): 
         criterion = nn.BCELoss(reduction='sum')   
@@ -283,8 +424,7 @@ class CGanNewTrainer(BaseTrainer):
         z = z.view(z.size(0),z.size(1),1,1)
         l = l.view(l.size(0),l.size(1),1,1)
         return self.generator.forward_cgan(z,l)
-    
-        
+
     def train_on_batch(self, obs, label ,epoch_batches,figdir,epoch,fixed_sample_state,
                        fixed_sample_label,
                        optimizer_D, optimizer_G,
