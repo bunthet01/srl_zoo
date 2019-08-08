@@ -114,7 +114,7 @@ class BaseLearner(object):
             if reward_name == 'reward':
                 obs = obs.to(self.device)
                 if self.use_conditional_model:
-                    action =  one_hot(action).to(self.device)
+                    action =  action.to(self.device)
                     states = self.module.model(obs, action)
                 else:
                     states = self.module.model(obs)
@@ -122,7 +122,7 @@ class BaseLearner(object):
                     states_split = torch.split(states, split_dim_list, dim=-1)
             obs_next = obs_next.to(self.device)
             if self.use_conditional_model:
-                next_action = one_hot(next_action).to(self.device)
+                next_action = next_action.to(self.device)
                 states_next = self.module.model(obs_next, next_action)
             else:
                 states_next = self.module.model(obs_next)
@@ -213,7 +213,7 @@ class SRL4robotics(BaseLearner):
     def __init__(self, state_dim, class_dim, img_shape=None, model_type="resnet", inverse_model_type="linear", log_folder="logs/default",
                  seed=1, learning_rate=0.001, learning_rate_gan=(0.001, 0.001), l1_reg=0.0, l2_reg=0.0, cuda=-1,
                  multi_view=False, losses=None, losses_weights_dict=None, n_actions=6, beta=1, Cmax=50, use_cci=False,
-                 split_dimensions=-1, path_to_dae=None, state_dim_dae=200, occlusion_percentage=None, pretrained_weights_path=None, debug=False):
+                 split_dimensions=-1, path_to_dae=None, state_dim_dae=200, occlusion_percentage=None, ls=False,add_noise=False, pretrained_weights_path=None,debug=False):
 
         super(SRL4robotics, self).__init__(state_dim, class_dim, BATCH_SIZE, seed, cuda, use_conditional_model="cvae" in losses)
 
@@ -223,6 +223,8 @@ class SRL4robotics(BaseLearner):
         self.beta = beta
         self.use_cci = use_cci
         self.Cmax = Cmax
+        self.ls = ls
+        self.add_noise = add_noise
         self.denoiser = None
         self.img_shape = img_shape
         self.model_type = model_type
@@ -633,13 +635,13 @@ class SRL4robotics(BaseLearner):
                                 loss_D, loss_G, history_message = self.module.model.train_on_batch(obs,epoch_batches,figdir,epoch,fixed_sample_state, self.optimizer_D, 
                                                                                                self.optimizer_G, loss_manager_D, 
                                                                                                loss_manager_G , valid_mode=valid_mode, 
-                                                                                               device=self.device)
+                                                                                               device=self.device, label_smothing=self.ls,add_noise=self.add_noise, minibatch=n_batch_per_epoch)
                             else:
                                 loss_D, loss_G, history_message = self.module.model.train_on_batch(obs,action,epoch_batches,figdir,epoch,fixed_sample_state,fixed_sample_label,
                                                                                                self.optimizer_D, 
                                                                                                self.optimizer_G, loss_manager_D, 
                                                                                                loss_manager_G , valid_mode=valid_mode, 
-                                                                                               device=self.device)
+                                                                                               device=self.device, label_smothing=self.ls,add_noise=self.add_noise, minibatch=n_batch_per_epoch)
                                 
                             epoch_loss_D +=loss_D
                             epoch_loss_G +=loss_G
@@ -711,7 +713,6 @@ class SRL4robotics(BaseLearner):
                         if self.use_cvae:
                             action = action.to(self.device)
                             next_action = next_action.to(self.device)
-                            print("a ", action.size())
                             loss = self.module.model.train_on_batch(obs, next_obs, action, next_action, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c )
                         elif self.use_vae:
                             loss = self.module.model.train_on_batch(obs, next_obs, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c)

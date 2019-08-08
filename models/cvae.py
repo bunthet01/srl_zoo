@@ -183,10 +183,7 @@ class CNNCVAE_NEW(BaseModelVAE):
         :return: (th.Tensor)
 
         """
-        print("0 :", c.size())
         c = self.fill[c.long()].to(self.device)
-        print("1 :", x.size())
-        print("2 :", c.size())
         x = th.cat([x,c], 1)
         x = self.encoder_conv_new(x)
         x = x.view(x.size(0), -1)

@@ -87,6 +87,9 @@ if __name__ == '__main__':
     parser.add_argument('--Cmax', type=float, default=50,
                         help='(For CCI-VAE or CCI-CVAE)') 
     parser.add_argument('--use-cci', action='store_true', default=False, help='if cci is use in VAE')
+    parser.add_argument('--ls', action='store_true', default=False, help='used to smooth the real label in dcGAN and CdcGAN')
+    parser.add_argument('--add-noise', action='store_true', default=False, help='Add noise to the input of the discriminator of dcGAN and CdcGan ')
+
                      
     args = parser.parse_args()
     # args.cuda = not args.no_cuda and th.cuda.is_available()
@@ -199,6 +202,9 @@ if __name__ == '__main__':
     exp_config['Cmax'] = args.Cmax
     exp_config['learning_rate_D'] = args.learning_rate_D
     exp_config['learning_rate_G'] = args.learning_rate_G
+    exp_config['label_smoothing'] = args.ls
+    exp_config['add_noise'] = args.add_noise
+    
 
     if "dae" in losses:
         exp_config['occlusion-percentage'] = args.occlusion_percentage
@@ -214,7 +220,7 @@ if __name__ == '__main__':
                         args.learning_rate_G),l1_reg=args.l1_reg, l2_reg=args.l2_reg, cuda=args.gpu_num, multi_view=args.multi_view,losses=losses,
                         losses_weights_dict=losses_weights_dict, n_actions=n_actions, beta=args.beta, use_cci=args.use_cci, Cmax=args.Cmax,
                         split_dimensions=split_dimensions, path_to_dae=args.path_to_dae, state_dim_dae=args.state_dim_dae, 
-                        occlusion_percentage=args.occlusion_percentage, pretrained_weights_path=args.srl_pre_weights)
+                        occlusion_percentage=args.occlusion_percentage, ls=args.ls,add_noise=args.add_noise, pretrained_weights_path=args.srl_pre_weights)
 
     if args.training_set_size > 0:
         limit = args.training_set_size
