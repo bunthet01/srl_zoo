@@ -5,7 +5,7 @@ import torchvision.utils as vutils
 import torch.nn.functional as F
 try:
     # relative import
-    from .base_models import BaseModelSRL, ConvSN2d, ConvTransposeSN2d, LinearSN, UNet
+    from .base_models import BaseModelSRL,BaseModelAutoEncoder, ConvSN2d, ConvTransposeSN2d, LinearSN, UNet
     from .base_trainer import BaseTrainer
     from ..losses.losses import ganNonSaturateLoss, autoEncoderLoss, ganBCEaccuracy, AEboundLoss
 except:
@@ -91,7 +91,8 @@ class Discriminator(nn.Module):
         x = self.activations['lrelu'](x)        #torch.Size([4, 200])
         x = self.last(x)                        #torch.Size([4, 1])
         x = self.activations['sigmoid'](x)      #torch.Size([4, 1])
-        return x
+        return x.squeeze()
+        
 class GeneratorUnet(nn.Module):
     def __init__(self, state_dim, img_shape,
                  unet_depth=2,  # 3
@@ -109,6 +110,7 @@ class GeneratorUnet(nn.Module):
         self.unet_bn = unet_bn
         # self.lipschitz_G = 1.1 [TODO]
         assert self.img_shape[0] < 10, "Pytorch uses 'channel first' convention."
+        print("GeneratorUnet: sn = ", spectral_norm)
         if self.spectral_norm:
             # state_layer = DenseSN(np.prod(self.img_shape), activation=None, lipschitz=self.lipschitz_G)(state_input)
             self.first = LinearSN(
@@ -138,7 +140,6 @@ class GeneratorUnet(nn.Module):
                 prev_channels, out_channels, kernel_size=3, stride=1, padding=1)
 
     def forward(self, x):
-        x = x.squeeze()
         x = self.first(x)
         x = self.activations['lrelu'](x)
         x = x.view(x.size(0), *self.img_shape)
@@ -163,7 +164,7 @@ class GeneratorResNet(BaseModelAutoEncoder):
         self.img_height, self.img_width = outshape[-2:]
         self.decoder_fc = nn.Sequential(
             nn.Linear(state_dim, self.img_height*self.img_width*64))
-        print("Generator: sn = ", spectral_norm)
+        print("GeneratorResnet: sn = ", spectral_norm)
         if spectral_norm:
             self.decoder_conv = nn.Sequential(
                 ConvTransposeSN2d(64, 64, kernel_size=3, stride=2),
@@ -209,7 +210,6 @@ class GeneratorResNet(BaseModelAutoEncoder):
             )
 
     def forward(self, z):
-        z = z.squeeze()
         decoded = self.decoder_fc(z)
         decoded = decoded.view(z.size(0),64, self.img_height,self.img_width)
         return self.decoder_conv(decoded)
@@ -222,7 +222,7 @@ class DiscriminatorDC(nn.Module):
         super(DiscriminatorDC, self).__init__()
         self.img_shape = img_shape
         self.state_dim = state_dim
-        print("Discriminator: sn = ", spectral_norm)
+        print("DiscriminatorDC: sn = ", spectral_norm)
         assert self.img_shape[0] < 10, "Pytorch uses 'channel first' convention."
         ndf = 128
         nc = img_shape[0]
@@ -272,14 +272,14 @@ class DiscriminatorDC(nn.Module):
 
     def forward(self, input):
         output = self.main(input)
-        return output.view(-1, 1).squeeze(1)
+        return output.squeeze()
         
 class GeneratorDC(nn.Module):
     def __init__(self, state_dim, img_shape, spectral_norm=False):
         super(GeneratorDC, self).__init__()
         self.img_shape = img_shape
         self.state_dim = state_dim
-        print("Generator: sn = ", spectral_norm)
+        print("GeneratorDC: sn = ", spectral_norm)
         assert self.img_shape[0] < 10, "Pytorch uses 'channel first' convention."
         nz = state_dim
         ngf = 128
@@ -333,6 +333,7 @@ class GeneratorDC(nn.Module):
             )
 
     def forward(self, input):
+        input = input.view(input.size(0), input.size(1),1,1)
         output = self.main(input)
         return output      
         
@@ -354,7 +355,7 @@ class GanNewTrainer(BaseTrainer):
     def build_model(self, model_type='dc'):
         assert model_type in ['custom_cnn', 'dc', 'unet']
         if model_type == "dc":
-            self.generator = GeneratorDC(self.state_dim, self.img_shape, spectral_norm=False)
+            self.generator = GeneratorDC(self.state_dim, self.img_shape, spectral_norm=True)
             self.discriminator = DiscriminatorDC(self.state_dim, self.img_shape, spectral_norm=True)
             
             self.generator.apply(self.weights_init)
@@ -376,7 +377,6 @@ class GanNewTrainer(BaseTrainer):
         return weight*err
         
     def decode(self, z):
-        z = z.view(z.size(0),z.size(1),1,1)
         return self.generator(z)
     
         
@@ -384,7 +384,7 @@ class GanNewTrainer(BaseTrainer):
                        optimizer_D, optimizer_G,
                        loss_manager_D, loss_manager_G,
                        valid_mode=False,
-                       device=torch.device('cpu'), label_smothing=False, add_noise=False,minibatch=10):
+                       device=torch.device('cpu'), label_smoothing=False, add_noise=False,minibatch=10):
         batch_size = obs.size(0)       
         ############################
         # (1) Update D network: maximize log(D(x)) + log(1 - D(G(z)))
@@ -393,7 +393,7 @@ class GanNewTrainer(BaseTrainer):
         loss_manager_D.resetLosses()
         
         # train with real
-        if label_smothing:
+        if label_smoothing:
             # real_label = torch.FloatTensor(batch_size,).uniform_(0.7,1.2).to(device)
             real_label = torch.full((batch_size,), 0.9, device=device)
         else:
@@ -407,7 +407,7 @@ class GanNewTrainer(BaseTrainer):
         self.BCEloss(output,real_label,loss_manager_D,1.0,'loss_D_real')
              
         # train with fake
-        sample_state = torch.randn(batch_size, self.state_dim, 1, 1, device=device)
+        sample_state = torch.randn(batch_size, self.state_dim,device=device)
         fake_label = torch.full((batch_size,), 0, device=device)
         fake_obs = self.generator(sample_state)
         if add_noise:
@@ -443,9 +443,6 @@ class GanNewTrainer(BaseTrainer):
         errG = errG.item()
         
         if epoch_batches % (minibatch-1) == 0 and not valid_mode:
-            #vutils.save_image(obs[0],
-            #        '{}/real_obs_epoch_{:03d}.png'.format(figdir, epoch+1),
-            #        normalize=True)
             fake_obs = self.generator(fixed_sample_state.to(device))
             vutils.save_image(fake_obs[0].detach(),
                     '{}/fake_samples_epoch_{:03d}.png'.format(figdir, epoch+1),

@@ -2,6 +2,7 @@ from __future__ import print_function, division
 
 import numpy as np
 import torch as th
+import re
 
 
 def preprocessInput(x, mode="tf"):
@@ -89,3 +90,34 @@ def one_hot(x):
             result = np.append(result, [l], 0)
         counter = counter+1
     return th.FloatTensor(result)
+    
+def gaussian_target(img_shape, t, MAX_X=0.85, MIN_X=-0.85, MAX_Y=0.85, MIN_Y=-0.85, sigma2=10):
+    X_range = img_shape[1]
+    Y_range = img_shape[2]
+    XY_range = np.arange(X_range*Y_range)
+    for i in range(t.size(0)):
+      X_t = int((MAX_X+t[i][1])*(img_shape[1]/(MAX_X-MIN_X)))
+      Y_t = int((MAX_Y-t[i][0])*(img_shape[2]/(MAX_Y-MIN_Y)))
+      bi_var_gaussian = -0.5 * (((XY_range // X_range)- X_t)**2 + (XY_range - (XY_range//Y_range)*Y_range - Y_t)**2)/sigma2
+      img_target = th.from_numpy((np.exp(bi_var_gaussian)/(2*np.pi*sigma2)).reshape(X_range, Y_range))
+      img_target = img_target[None,...][None,...]
+      if i==0: output = img_target
+      else: output = th.cat([output,img_target],0)
+    return output
+
+def attach_target_pos_to_all_imgs(images_path, target_pos):
+    all_target_pos = np.zeros((images_path.shape[0],2))
+    for i in range(images_path.shape[0]):
+        x = re.findall("_[0-9][0-9][0-9]", images_path[i])
+        x = int(x[0].replace("_",""))
+        all_target_pos[i] = target_pos[i]
+    return all_target_pos
+
+
+def sample_target_pos(batch_size,TARGET_MAX_X, TARGET_MIN_X, TARGET_MAX_Y, TARGET_MIN_Y):
+    random_init_x = np.random.random_sample(batch_size) * (TARGET_MAX_X - TARGET_MIN_X) + \
+                    TARGET_MIN_X
+    random_init_y = np.random.random_sample(batch_size) * (TARGET_MAX_Y - TARGET_MIN_Y) + \
+                TARGET_MIN_Y
+    return th.FloatTensor(np.concatenate((random_init_x[...,None], random_init_y[...,None]),axis=1))
+    

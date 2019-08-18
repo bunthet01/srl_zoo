@@ -8,12 +8,18 @@ try:
     from .base_models import BaseModelSRL, ConvSN2d, ConvTransposeSN2d, LinearSN, UNet
     from .base_trainer import BaseTrainer
     from ..losses.losses import ganNonSaturateLoss, autoEncoderLoss, ganBCEaccuracy, AEboundLoss
-    from ..preprocessing.utils import one_hot
+    from ..preprocessing.utils import one_hot,sample_target_pos
+    import sys
+    sys.path.append("..")
+    from real_robots.constants import MIN_X, MAX_X, MIN_Y, MAX_Y,TARGET_MAX_X, TARGET_MIN_X, TARGET_MAX_Y, TARGET_MIN_Y   # using Omnibot_env
 except:
     from models.base_models import BaseModelSRL, ConvSN2d, ConvTransposeSN2d, LinearSN, UNet
     from models.base_trainer import BaseTrainer
     from losses.losses import ganNonSaturateLoss, autoEncoderLoss, ganBCEaccuracy, AEboundLoss
-    from preprocessing.utils import one_hot
+    from preprocessing.utils import one_hot,sample_target_pos
+    import sys
+    sys.path.append("..")
+    from real_robots.constants import MIN_X, MAX_X, MIN_Y, MAX_Y,TARGET_MAX_X, TARGET_MIN_X, TARGET_MAX_Y, TARGET_MIN_Y   # using Omnibot_env
 from torchsummary import summary
 
 class GeneratorUnet(nn.Module):
@@ -38,10 +44,10 @@ class GeneratorUnet(nn.Module):
         if self.spectral_norm:
             # state_layer = DenseSN(np.prod(self.img_shape), activation=None, lipschitz=self.lipschitz_G)(state_input)
             self.first = LinearSN(
-                self.state_dim+self.label_dim, np.prod(self.img_shape), bias=True)
+                self.state_dim+self.label_dim+2, np.prod(self.img_shape), bias=True)
         else:
             self.first = nn.Linear(
-                self.state_dim+self.label_dim, np.prod(self.img_shape), bias=True)
+                self.state_dim+self.label_dim+2, np.prod(self.img_shape), bias=True)
 
             # state_layer = Dense(np.prod(self.img_shape), activation=None)(state_input)
         self.activations = nn.ModuleDict([
@@ -63,8 +69,8 @@ class GeneratorUnet(nn.Module):
             self.last = nn.Conv2d(
                 prev_channels, out_channels, kernel_size=3, stride=1, padding=1)
 
-    def forward_cgan(self, x, l):
-        x = torch.cat([x,one_hot(l).to(self.device)],1)
+    def forward_cgan(self, x, l, t):
+        x = torch.cat([x,one_hot(l).to(self.device),t.float().to(self.device)],1)
         x = self.first(x)
         x = self.activations['lrelu'](x)
         x = x.view(x.size(0), *self.img_shape)
@@ -92,7 +98,7 @@ class GeneratorResNet(BaseModelSRL):
         _, self.in_height, self.in_width = self.in_shape ## [channel, high, width]
 
         self.decoder_fc = nn.Sequential(
-            nn.Linear(state_dim+label_dim, self.in_height * self.in_width * 64)
+            nn.Linear(state_dim+label_dim+2, self.in_height * self.in_width * 64)
         )
         if self.spectral_norm:
             self.decoder_conv = nn.Sequential(
@@ -139,8 +145,8 @@ class GeneratorResNet(BaseModelSRL):
             )
         
 
-    def forward_cgan(self, x, l):
-        decoded = torch.cat([x, one_hot(l).to(self.device)], 1)
+    def forward_cgan(self, x, l, t):
+        decoded = torch.cat([x, one_hot(l).to(self.device), t.float().to(self.device)], 1)
         decoded = self.decoder_fc(decoded)
         decoded = decoded.view(x.size(0), 64, self.in_height, self.in_width)
         return self.decoder_conv(decoded)
@@ -204,7 +210,7 @@ class Discriminator(nn.Module):
             in_features = last_channels * \
                 (self.img_shape[1]//2**times) * (self.img_shape[2]//2**times)   
             self.before_last = LinearSN(in_features, self.state_dim, bias=True)
-            self.last = LinearSN(self.state_dim+self.label_dim, 1, bias=True)
+            self.last = LinearSN(self.state_dim+self.label_dim+2, 1, bias=True)
         else:
             self.modules_list.append(nn.Conv2d(self.d_chs*8, self.d_chs*4,
                                                kernel_size=3, stride=1, padding=1))
@@ -214,16 +220,16 @@ class Discriminator(nn.Module):
                 (self.img_shape[1]//2**times) * (self.img_shape[2]//2**times)
             self.before_last = nn.Linear(
                 in_features, self.state_dim, bias=True)
-            self.last = nn.Linear(self.state_dim+self.label_dim, 1, bias=True)
+            self.last = nn.Linear(self.state_dim+self.label_dim+2, 1, bias=True)
 
-    def forward_cgan(self, x, l):
+    def forward_cgan(self, x, l, t):
         for layer in self.modules_list:
             x = layer(x)
         x = x.view(x.size(0), -1)  # flatten
         x = self.activations['lrelu'](x)
         x = self.before_last(x)
         x = self.activations['lrelu'](x)
-        x = torch.cat([x,one_hot(l).to(self.device)],1)
+        x = torch.cat([x,one_hot(l).to(self.device),t.float().to(self.device)],1)
         x = self.last(x)
         x = self.activations['sigmoid'](x)
         return x
@@ -280,15 +286,6 @@ class EncoderUnet(BaseModelSRL):
             self.modules_list.append(self.activations['lrelu'])
             self.before_last = nn.Linear(inter_features, 100, bias=True)
             self.last = nn.Linear(100, self.state_dim, bias=True)
-            # self.top_model = nn.Sequential(OrderDict([
-            #                     ('conv1', nn.Conv2d(prev_channels, 1, kernel_size=4, stride=2, padding=1)),
-            #                     ('relu1', self.activations['relu']),
-            #                     ('conv2', nn.Conv2d(1, 1, kernel_size=4, stride=2, padding=1)),
-            #                     ('relu2', self.activations['relu']),
-            #                     ('dense1', nn.Linear(inter_features, 100, bias=True)),
-            #                     ('relu3', self.activations['relu']),
-            #                     ('dense2', nn.Linear(100, self.state_dim, bias=True)),
-            #                 ]))
 
     def forward(self, x):
         x = self.unet(x)
@@ -389,7 +386,7 @@ class CGANTrainer(BaseTrainer):
     def forward(self, x):
         return self.encoder(x)
 
-    def train_on_batch_E(self, obs, next_obs,label, next_label, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu')):
+    def train_on_batch_E(self, obs, next_obs,label, next_label,target_pos, next_target_pos, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu')):
         """
         loss_manager will cumulate the loss (pytorch tensor) of e.g. inverse/forward/reward models, etc.
 
@@ -401,22 +398,24 @@ class CGANTrainer(BaseTrainer):
         # reconstruct_obs, reconstruct_obs_next = self.reconstruct(obs), self.reconstruct(next_obs)
 
         state_pred = self.encoder(obs)
-        reconstruct_obs = self.generator.forward_cgan(state_pred, label)
-        reconstruct_obs_next = self.reconstruct(next_obs, next_label)
+        reconstruct_obs = self.generator.forward_cgan(state_pred, label, target_pos)
+        reconstruct_obs_next = self.reconstruct(next_obs, next_label, next_target_pos)
         autoEncoderLoss(obs, reconstruct_obs, next_obs, reconstruct_obs_next, 10000.0, loss_manager)
         AEboundLoss(state_pred, 1.0, loss_manager)
         loss = self.update_nn_weights(optimizer, loss_manager, valid_mode=valid_mode)
         return loss
 
-    def train_on_batch_D(self, obs,label, label_valid, label_fake, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu')):
+    def train_on_batch_D(self, obs,label,target_pos, label_valid, label_fake, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu')):
         sample_state = torch.randn((obs.size(0), self.state_dim), requires_grad=False).to(device)
         sample_label = torch.randint(self.label_dim, (obs.size(0),)).to(device)
-        fake_img = self.generator.forward_cgan(sample_state, sample_label)
+        sample_t_pos = sample_target_pos(obs.size(0),TARGET_MAX_X, TARGET_MIN_X, TARGET_MAX_Y, TARGET_MIN_Y)
+        
+        fake_img = self.generator.forward_cgan(sample_state, sample_label, sample_t_pos)
         # fake_loss
-        fake_img_rating = self.discriminator.forward_cgan(fake_img.detach(), sample_label)
+        fake_img_rating = self.discriminator.forward_cgan(fake_img.detach(), sample_label, sample_t_pos)
         ganNonSaturateLoss(fake_img_rating, label_fake, weight=1.0, loss_manager=loss_manager, name="ns_loss_D_fake")
         # real_loss
-        real_img_rating = self.discriminator.forward_cgan(obs, label)
+        real_img_rating = self.discriminator.forward_cgan(obs, label, target_pos)
         ganNonSaturateLoss(real_img_rating, label_valid, weight=1.0, loss_manager=loss_manager, name="ns_loss_D_real")
         loss = self.update_nn_weights(optimizer, loss_manager, valid_mode=valid_mode)
         acc_pos = ganBCEaccuracy(real_img_rating, label=1)
@@ -427,17 +426,21 @@ class CGANTrainer(BaseTrainer):
     def train_on_batch_G(self, obs, label_valid, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu')):
         sample_state = torch.randn((obs.size(0), self.state_dim), requires_grad=False).to(device)
         sample_label = torch.randint(self.label_dim, (obs.size(0),)).to(device)
-        fake_img = self.generator.forward_cgan(sample_state,sample_label)
-        fake_rating = self.discriminator.forward_cgan(fake_img, sample_label)
+        sample_t_pos = sample_target_pos(obs.size(0),TARGET_MAX_X, TARGET_MIN_X, TARGET_MAX_Y, TARGET_MIN_Y)
+        
+        fake_img = self.generator.forward_cgan(sample_state,sample_label,sample_t_pos)
+        fake_rating = self.discriminator.forward_cgan(fake_img, sample_label,sample_t_pos)
         ganNonSaturateLoss(fake_rating, label_valid, weight=1.0, loss_manager=loss_manager, name="ns_loss_G")
         loss = self.update_nn_weights(optimizer, loss_manager, valid_mode=valid_mode)
         acc = ganBCEaccuracy(fake_rating, label=1)
         return loss, acc.item()
 
-    def reconstruct(self, x, l):
-        return self.generator.forward_cgan(self.encoder(x),l)
-    def decode(self, z, l):
-        return self.generator.forward_cgan(z,l)
+    def reconstruct(self, x, l, t):
+        return self.generator.forward_cgan(self.encoder(x),l, t)
+    def decode(self, z, l, t):
+        l = l.long().to('cpu')
+        t = t.to('cpu')
+        return self.generator.forward_cgan(z,l, t)
 
     def train_on_batch(self, obs, next_obs,
                        optimizer_D, optimizer_G, optimizer_E,
@@ -460,12 +463,12 @@ class CGANTrainer(BaseTrainer):
             for _ in range(D_steps):
                 optimizer_D.zero_grad()
                 loss_manager_D.resetLosses()
-                (sample_idx, obs, next_obs, action,_, reward, cls_gt) = next(dataloader)
+                (sample_idx, obs, next_obs, action,_, reward, cls_gt, target_pos, next_target_pos) = next(dataloader)
                 cls_gt = cls_gt.to(device)
                 obs = obs.to(device)
                 action = action.to(device)
                 # re-define the length label_valid/label_fake, because obs.size(0) changes
-                d_loss, d_acc = self.train_on_batch_D(obs,action, label_valid[:obs.size(0)], label_fake[:obs.size(
+                d_loss, d_acc = self.train_on_batch_D(obs,action,target_pos, label_valid[:obs.size(0)], label_fake[:obs.size(
                     0)], optimizer_D, loss_manager_D, valid_mode=valid_mode, device=device)
                 epoch_loss_D += d_loss
                 epoch_batches_D += 1
@@ -477,7 +480,7 @@ class CGANTrainer(BaseTrainer):
             for _ in range(G_steps):
                 optimizer_G.zero_grad()
                 loss_manager_G.resetLosses()
-                (sample_idx, obs, next_obs, action,_, reward, cls_gt) = next(dataloader)
+                (sample_idx, obs, next_obs, action,_, reward, cls_gt, target_pos, next_target_pos) = next(dataloader)
                 cls_gt = cls_gt.to(device)
                 obs = obs.to(device)
                 # re-define the length label_valid, because obs.size(0) changes
@@ -492,12 +495,12 @@ class CGANTrainer(BaseTrainer):
         for _ in range(E_steps):
             optimizer_E.zero_grad()
             loss_manager_E.resetLosses()
-            (sample_idx, obs, next_obs, action,next_action, reward, cls_gt) = next(dataloader)
+            (sample_idx, obs, next_obs, action,next_action, reward, cls_gt, target_pos, next_target_pos) = next(dataloader)
             obs, next_obs = obs.to(device), next_obs.to(device)
             action, next_action = action.to(device), next_action.to(device)
             cls_gt = cls_gt.to(device)
             e_loss = self.train_on_batch_E(
-                obs, next_obs,action, next_action, optimizer_E, loss_manager_E, valid_mode=valid_mode, device=device)
+                obs, next_obs,action, next_action, target_pos, next_target_pos, optimizer_E, loss_manager_E, valid_mode=valid_mode, device=device)
             epoch_loss_E += e_loss
             epoch_batches_E += 1
         if not valid_mode:

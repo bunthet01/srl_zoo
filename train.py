@@ -16,7 +16,7 @@ import models.learner as learner
 import plotting.representation_plot as plot_script
 from models.learner import SRL4robotics
 from pipeline import getLogFolderName, saveConfig, correlationCall
-from plotting.losses_plot import plotLosses
+from plotting.losses_plot import plotLosses, plotloss_G_D
 from plotting.representation_plot import plotRepresentation
 from utils import parseDataFolder, createFolder, getInputBuiltin, loadData, buildConfig, parseLossArguments
 from collections import defaultdict
@@ -34,10 +34,10 @@ if __name__ == '__main__':
     parser.add_argument('--val-size', type=float, default=0.2, help='Validation set size in percentage (default: 0.2)')
     parser.add_argument('--training-set-size', type=int, default=-1,
                         help='Limit size (number of samples) of the training set (default: -1)')
-    parser.add_argument('-lr', '--learning-rate', type=float, default=0.005, help='learning rate (default: 0.005)')
-    parser.add_argument('-lr_G', '--learning-rate-G', type=float, default=7.0 *
+    parser.add_argument('-lr', '--learning-rate', type=float, default=0.0005, help='learning rate (default: 0.005)')
+    parser.add_argument('-lr_G', '--learning-rate-G', type=float, default=1.0 *
                         1e-5, help='learning rate GAN: Generator (default: None)')
-    parser.add_argument('-lr_D', '--learning-rate-D', type=float, default=1.2*1e-5,
+    parser.add_argument('-lr_D', '--learning-rate-D', type=float, default=5.0*1e-5,
                         help='learning rate GAN: Discriminator (default: None)')
     parser.add_argument('--l1-reg', type=float, default=0.0, help='L1 regularization coeff (default: 0.0)')
     parser.add_argument('--l2-reg', type=float, default=0.0, help='L2 regularization coeff (default: 0.0)')
@@ -258,12 +258,16 @@ if __name__ == '__main__':
         plotLosses(loss_history[0], path=args.log_folder, name="Autoencoder_losses")       
         plotLosses(loss_history[1], path=args.log_folder, name="Dicriminator_losses")
         plotLosses(loss_history[2], path=args.log_folder, name="Generator_losses")
+        plotloss_G_D(loss_history[2], loss_history[1], path=args.log_folder, name="G_D_losses")
+
     
         loss_history = {**loss_history[0],**loss_history[1],**loss_history[2]} 
     elif "gan_new" in losses or "cgan_new" in losses:
         # Save plot    
         plotLosses(loss_history[0], path=args.log_folder, name="Dicriminator_losses")
         plotLosses(loss_history[1], path=args.log_folder, name="Generator_losses")
+        plotloss_G_D(loss_history[1], loss_history[0], path=args.log_folder, name="G_D_losses")
+	
     
         loss_history = {**loss_history[0],**loss_history[1]} 
     else:

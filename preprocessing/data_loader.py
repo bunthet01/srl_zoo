@@ -364,20 +364,25 @@ class DataLoader(object):
 
 
 class DataLoaderConditional(object):
-    def __init__(self, minibatchlist,actions_unnormalize, generative_model_state_dim, seed, max_queue_len=4, infinite_loop=True):
+    def __init__(self, minibatchlist,actions,task, generative_model_state_dim,TARGET_MAX_X, TARGET_MIN_X, TARGET_MAX_Y, TARGET_MIN_Y, seed, max_queue_len=4, infinite_loop=True):
         """
         A Custom dataloader preparing data to forward to Conditional model   
         :param n_workers: (int) number of preprocessing worker (load and preprocess each image)
         :param max_queue_len: (int) Max number of minibatches that can be preprocessed at the same time
         :param infinite_loop: (bool) whether to have an iterator that can be resetted
         :param generative_model_state_dim:([np.array]) The dimension of the latent variable in generative model  
-        :param actions_unnormalize : ([np.array]) The actions used to generate observations with Conditional Model
+        :param actions : ([np.array]) The actions used to generate observations with Conditional Model
         :param seed :(int) random seed used to generated latent variable
         """
         super(DataLoaderConditional, self).__init__()
         self.minibatchlist = minibatchlist
         self.seed = seed
-        self.actions_unnormalize = actions_unnormalize
+        self.task = task
+        self.TARGET_MAX_X = TARGET_MAX_X
+        self.TARGET_MIN_X = TARGET_MIN_X
+        self.TARGET_MAX_Y = TARGET_MAX_Y
+        self.TARGET_MIN_Y = TARGET_MIN_Y
+        self.actions = actions
         self.generative_model_state_dim = generative_model_state_dim
         self.queue = Queue(max_queue_len)
         self.infinite_loop = infinite_loop
@@ -418,7 +423,7 @@ class DataLoaderConditional(object):
             start = False    
             indices = np.arange(len(self.minibatchlist), dtype=np.int64)
             for minibatch_idx in indices:
-                batch = self._makeBatchElement(minibatch_idx, self.minibatchlist, self.generative_model_state_dim, self.actions_unnormalize, self.seed )
+                batch = self._makeBatchElement(minibatch_idx, self.minibatchlist, self.generative_model_state_dim, self.actions,self.task, self.seed, self.TARGET_MAX_X, self.TARGET_MIN_X,self.TARGET_MAX_Y, self.TARGET_MIN_Y )
                 self.queue.put(batch)
 
                 # Free memory
@@ -427,14 +432,23 @@ class DataLoaderConditional(object):
             self.queue.put(None)
 
     @classmethod
-    def _makeBatchElement(cls, minibatch_idx, minibatchlist, generative_model_state_dim, actions_unnormalize, seed):
+    def _makeBatchElement(cls, minibatch_idx, minibatchlist, generative_model_state_dim, actions,task, seed, TARGET_MAX_X, TARGET_MIN_X,TARGET_MAX_Y, TARGET_MIN_Y ):
         """
         """
         np.random.seed(seed+minibatch_idx)
         z = th.from_numpy(np.random.normal(0,1,(minibatchlist[minibatch_idx].shape[0], generative_model_state_dim))).float()
-        actions = th.FloatTensor(actions_unnormalize[minibatchlist[minibatch_idx]])
+        actions = th.FloatTensor(actions[minibatchlist[minibatch_idx]])
+        if task == 'sc':
+            random_init_x = np.random.random_sample(minibatchlist[minibatch_idx].shape[0]) * (TARGET_MAX_X - TARGET_MIN_X) + \
+                        TARGET_MIN_X
+            random_init_y = np.random.random_sample(minibatchlist[minibatch_idx].shape[0]) * (TARGET_MAX_Y - TARGET_MIN_Y) + \
+                        TARGET_MIN_Y
+        else:
+            random_init_x = np.zeros(minibatchlist[minibatch_idx].shape[0])
+            random_init_y = np.zeros(minibatchlist[minibatch_idx].shape[0])
+        target_pos = th.FloatTensor(np.concatenate((random_init_x[...,None], random_init_y[...,None]),axis=1))
 
-        return (z, actions)
+        return (z, actions, target_pos)
 
     def __len__(self):
         return self.n_minibatches
@@ -569,7 +583,7 @@ class RobotEnvDataset(torch.utils.data.Dataset):
         Set to false, it will only output one th.Tensor.
     """
 
-    def __init__(self, sample_indices, images_path, actions, rewards, episode_starts,
+    def __init__(self, sample_indices, images_path, actions, all_imgs_target_pos, rewards, episode_starts,
                  img_shape=None,
                  mode=1,
                  multi_view=False,
@@ -582,6 +596,7 @@ class RobotEnvDataset(torch.utils.data.Dataset):
         # Initialization
         self.sample_indices = sample_indices
         self.images_path = images_path
+        self.all_imgs_target_pos = all_imgs_target_pos
         self.actions = actions
         self.rewards = rewards
         self.episode_starts = episode_starts
@@ -633,20 +648,26 @@ class RobotEnvDataset(torch.utils.data.Dataset):
                 img_next = self._get_one_img(self.images_path[index+1])
                 action = self.actions[index]
                 next_action = self.actions[index+1]
+                target_pos = self.all_imgs_target_pos[index]
+                next_target_pos = self.all_imgs_target_pos[index+1]
                 reward = self.rewards[index]
                 cls_gt = self.class_labels[index]
-                return index, img.astype(self.dtype), img_next.astype(self.dtype), action, next_action, reward, cls_gt
+                return index, img.astype(self.dtype), img_next.astype(self.dtype), action, next_action, reward, cls_gt, target_pos, next_target_pos
             elif self.mode == 0:
                 img = self._get_one_img(image_path)
                 action = self.actions[index]
-                return img.astype(self.dtype), action
+                target_pos = self.all_imgs_target_pos[index]
+                return img.astype(self.dtype), action, target_pos
             elif self.mode == 2:
                 img = self._get_one_img(image_path)
                 img_next = self._get_one_img(self.images_path[index+1])
                 reward = self.rewards[index]
                 action = self.actions[index]
                 next_action = self.actions[index+1]
-                return img.astype(self.dtype), img_next.astype(self.dtype), reward,action, next_action      
+                target_pos = self.all_imgs_target_pos[index]
+                next_target_pos = self.all_imgs_target_pos[index+1]
+                
+                return img.astype(self.dtype), img_next.astype(self.dtype), reward,action, next_action, target_pos, next_target_pos    
             else:
                 return
 
