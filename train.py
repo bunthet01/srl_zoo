@@ -89,6 +89,7 @@ if __name__ == '__main__':
     parser.add_argument('--use-cci', action='store_true', default=False, help='if cci is use in VAE')
     parser.add_argument('--ls', action='store_true', default=False, help='used to smooth the real label in dcGAN and CdcGAN')
     parser.add_argument('--add-noise', action='store_true', default=False, help='Add noise to the input of the discriminator of dcGAN and CdcGan ')
+    parser.add_argument('--only-action', action='store_true', default=False, help='Conditioned only on action')
 
                      
     args = parser.parse_args()
@@ -204,6 +205,9 @@ if __name__ == '__main__':
     exp_config['learning_rate_G'] = args.learning_rate_G
     exp_config['label_smoothing'] = args.ls
     exp_config['add_noise'] = args.add_noise
+    exp_config['only_action'] = args.only_action
+    exp_config['debug'] = args.debug
+    exp_config['pretrained_weights_path'] = args.srl_pre_weights
     
 
     if "dae" in losses:
@@ -215,12 +219,13 @@ if __name__ == '__main__':
     class_dim = 4
     exp_config['class_dim'] = class_dim
 
-    srl = SRL4robotics(args.state_dim, class_dim, img_shape=img_shape, model_type=args.model_type, inverse_model_type=args.inverse_model_type,
+    srl = SRL4robotics(args.state_dim, class_dim, img_shape=img_shape, model_type=args.model_type, inverse_model_type=args.inverse_model_type
+                        , ls=args.ls,add_noise=args.add_noise,only_action = args.only_action, pretrained_weights_path=args.srl_pre_weights,debug=args.debug,
                        seed=args.seed,log_folder=args.log_folder, learning_rate=args.learning_rate, learning_rate_gan=( args.learning_rate_D,
                         args.learning_rate_G),l1_reg=args.l1_reg, l2_reg=args.l2_reg, cuda=args.gpu_num, multi_view=args.multi_view,losses=losses,
                         losses_weights_dict=losses_weights_dict, n_actions=n_actions, beta=args.beta, use_cci=args.use_cci, Cmax=args.Cmax,
                         split_dimensions=split_dimensions, path_to_dae=args.path_to_dae, state_dim_dae=args.state_dim_dae, 
-                        occlusion_percentage=args.occlusion_percentage, ls=args.ls,add_noise=args.add_noise, pretrained_weights_path=args.srl_pre_weights)
+                        occlusion_percentage=args.occlusion_percentage)
 
     if args.training_set_size > 0:
         limit = args.training_set_size

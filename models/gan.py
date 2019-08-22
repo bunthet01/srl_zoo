@@ -505,7 +505,8 @@ class GANTrainer(BaseTrainer):
                        batch_size=32,
                        dataloader=None,
                        valid_mode=False,
-                       device=torch.device('cpu')):
+                       device=torch.device('cpu'),
+                       only_action = False):
         # import ipdb; ipdb.set_trace()
         label_valid = torch.ones((batch_size, 1)).to(device)
         label_fake = torch.zeros((batch_size, 1)).to(device)

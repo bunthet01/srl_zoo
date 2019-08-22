@@ -26,13 +26,14 @@ class GeneratorUnet(nn.Module):
     def __init__(self, state_dim, img_shape, label_dim,
                  unet_depth=2,  # 3
                  unet_ch=16,  # 32
-                 spectral_norm=False,device='cpu',
+                 spectral_norm=False,device='cpu', only_action=False,
                  unet_bn=False,
                  unet_drop=0.0):
         super().__init__()
         self.state_dim = state_dim
         self.img_shape = img_shape
         self.device = device
+        self.only_action = only_action
         self.label_dim = label_dim
         self.spectral_norm = spectral_norm
         self.unet_depth = unet_depth
@@ -43,11 +44,19 @@ class GeneratorUnet(nn.Module):
         assert self.img_shape[0] < 10, "Pytorch uses 'channel first' convention."
         if self.spectral_norm:
             # state_layer = DenseSN(np.prod(self.img_shape), activation=None, lipschitz=self.lipschitz_G)(state_input)
-            self.first = LinearSN(
-                self.state_dim+self.label_dim+2, np.prod(self.img_shape), bias=True)
+            if self.only_action:
+                self.first = LinearSN(
+                    self.state_dim+self.label_dim, np.prod(self.img_shape), bias=True)
+            else:
+                self.first = LinearSN(
+                    self.state_dim+self.label_dim+2, np.prod(self.img_shape), bias=True)
         else:
-            self.first = nn.Linear(
-                self.state_dim+self.label_dim+2, np.prod(self.img_shape), bias=True)
+            if only_action:
+                self.first = nn.Linear(
+                    self.state_dim+self.label_dim+2, np.prod(self.img_shape), bias=True)
+            else:
+                self.first = nn.Linear(
+                    self.state_dim+self.label_dim+2, np.prod(self.img_shape), bias=True)
 
             # state_layer = Dense(np.prod(self.img_shape), activation=None)(state_input)
         self.activations = nn.ModuleDict([
@@ -69,8 +78,11 @@ class GeneratorUnet(nn.Module):
             self.last = nn.Conv2d(
                 prev_channels, out_channels, kernel_size=3, stride=1, padding=1)
 
-    def forward_cgan(self, x, l, t):
-        x = torch.cat([x,one_hot(l).to(self.device),t.float().to(self.device)],1)
+    def forward_cgan(self, x, l, t, only_action):
+        if only_action:
+            x = torch.cat([x,one_hot(l).to(self.device)],1)
+        else:
+            x = torch.cat([x,one_hot(l).to(self.device),t.float().to(self.device)],1)
         x = self.first(x)
         x = self.activations['lrelu'](x)
         x = x.view(x.size(0), *self.img_shape)
@@ -85,21 +97,26 @@ class GeneratorResNet(BaseModelSRL):
     ResNet Generator
     """
 
-    def __init__(self, state_dim, img_shape, label_dim, in_shape, spectral_norm=False, device='cpu'):
+    def __init__(self, state_dim, img_shape, label_dim, in_shape, spectral_norm=False, device='cpu', only_action=False):
         super().__init__(state_dim=state_dim, img_shape=img_shape)
         assert img_shape[0] < 10, "Pytorch uses 'channel first' convention."
         self.state_dim = state_dim
         self.in_shape = in_shape
         self.img_shape = img_shape
         self.device = device
+        self.only_action = only_action
         self.label_dim = label_dim
         self.spectral_norm = spectral_norm
 
         _, self.in_height, self.in_width = self.in_shape ## [channel, high, width]
-
-        self.decoder_fc = nn.Sequential(
-            nn.Linear(state_dim+label_dim+2, self.in_height * self.in_width * 64)
-        )
+        if self.only_action:
+            self.decoder_fc = nn.Sequential(
+                nn.Linear(state_dim+label_dim, self.in_height * self.in_width * 64)
+            )
+        else:
+            self.decoder_fc = nn.Sequential(
+                nn.Linear(state_dim+label_dim+2, self.in_height * self.in_width * 64)
+            )
         if self.spectral_norm:
             self.decoder_conv = nn.Sequential(
                 ConvTransposeSN2d(64, 64, kernel_size=3, stride=2),
@@ -145,8 +162,11 @@ class GeneratorResNet(BaseModelSRL):
             )
         
 
-    def forward_cgan(self, x, l, t):
-        decoded = torch.cat([x, one_hot(l).to(self.device), t.float().to(self.device)], 1)
+    def forward_cgan(self, x, l, t, only_action):
+        if only_action:
+            decoded = torch.cat([x, one_hot(l).to(self.device)], 1)
+        else:
+            decoded = torch.cat([x, one_hot(l).to(self.device), t.float().to(self.device)], 1)
         decoded = self.decoder_fc(decoded)
         decoded = decoded.view(x.size(0), 64, self.in_height, self.in_width)
         return self.decoder_conv(decoded)
@@ -154,13 +174,14 @@ class GeneratorResNet(BaseModelSRL):
 
 class Discriminator(nn.Module):
     def __init__(self, state_dim, img_shape,label_dim,
-                 spectral_norm=False,device='cpu',
+                 spectral_norm=False,device='cpu',only_action=False,
                  d_chs=16):  # 32
         super().__init__()
         self.img_shape = img_shape
         self.state_dim = state_dim
         self.label_dim = label_dim
         self.device = device
+        self.only_action = only_action
         self.spectral_norm = spectral_norm
         self.d_chs = d_chs
 
@@ -210,7 +231,10 @@ class Discriminator(nn.Module):
             in_features = last_channels * \
                 (self.img_shape[1]//2**times) * (self.img_shape[2]//2**times)   
             self.before_last = LinearSN(in_features, self.state_dim, bias=True)
-            self.last = LinearSN(self.state_dim+self.label_dim+2, 1, bias=True)
+            if self.only_action:
+                self.last = LinearSN(self.state_dim+self.label_dim, 1, bias=True)
+            else:
+                self.last = LinearSN(self.state_dim+self.label_dim+2, 1, bias=True)
         else:
             self.modules_list.append(nn.Conv2d(self.d_chs*8, self.d_chs*4,
                                                kernel_size=3, stride=1, padding=1))
@@ -220,16 +244,22 @@ class Discriminator(nn.Module):
                 (self.img_shape[1]//2**times) * (self.img_shape[2]//2**times)
             self.before_last = nn.Linear(
                 in_features, self.state_dim, bias=True)
-            self.last = nn.Linear(self.state_dim+self.label_dim+2, 1, bias=True)
+            if self.only_action:
+                self.last = nn.Linear(self.state_dim+self.label_dim, 1, bias=True)
+            else:
+                self.last = nn.Linear(self.state_dim+self.label_dim+2, 1, bias=True)
 
-    def forward_cgan(self, x, l, t):
+    def forward_cgan(self, x, l, t, only_action):
         for layer in self.modules_list:
             x = layer(x)
         x = x.view(x.size(0), -1)  # flatten
         x = self.activations['lrelu'](x)
         x = self.before_last(x)
         x = self.activations['lrelu'](x)
-        x = torch.cat([x,one_hot(l).to(self.device),t.float().to(self.device)],1)
+        if only_action:
+            x = torch.cat([x,one_hot(l).to(self.device)],1)
+        else:
+            x = torch.cat([x,one_hot(l).to(self.device),t.float().to(self.device)],1)
         x = self.last(x)
         x = self.activations['sigmoid'](x)
         return x
@@ -363,30 +393,31 @@ class EncoderResNet(BaseModelSRL):
 
 
 class CGANTrainer(BaseTrainer):
-    def __init__(self, state_dim=2, label_dim=4, img_shape=None, device='cpu'):
+    def __init__(self, state_dim=2, label_dim=4, img_shape=None, device='cpu', only_action=False):
         super().__init__()
         self.img_shape = img_shape
         self.state_dim = state_dim
         self.label_dim = label_dim
         self.device = device
+        self.only_action = only_action
 
     def build_model(self, model_type='unet'):
         if model_type == 'unet':
             self.encoder = EncoderUnet(self.state_dim, self.img_shape, spectral_norm=False, device=self.device)
-            self.generator = GeneratorUnet(self.state_dim, self.img_shape,self.label_dim, spectral_norm=True, device=self.device)
-            self.discriminator = Discriminator(self.state_dim, self.img_shape,self.label_dim, spectral_norm=True, device=self.device)
+            self.generator = GeneratorUnet(self.state_dim, self.img_shape,self.label_dim, spectral_norm=True, device=self.device, only_action=self.only_action)
+            self.discriminator = Discriminator(self.state_dim, self.img_shape,self.label_dim, spectral_norm=True, device=self.device, only_action=self.only_action)
         elif model_type == 'custom_cnn':
             self.encoder = EncoderResNet(self.state_dim, self.img_shape, spectral_norm=False, device=self.device)
             outshape = summary(self.encoder.encoder_conv, self.img_shape, show=False) # [-1, channels, high, width]
-            self.generator = GeneratorResNet(self.state_dim, self.img_shape,self.label_dim, outshape[1:], spectral_norm=True, device=self.device)
-            self.discriminator = Discriminator(self.state_dim, self.img_shape,self.label_dim, spectral_norm=True, device=self.device)
+            self.generator = GeneratorResNet(self.state_dim, self.img_shape,self.label_dim, outshape[1:], spectral_norm=True, device=self.device, only_action=self.only_action)
+            self.discriminator = Discriminator(self.state_dim, self.img_shape,self.label_dim, spectral_norm=True, device=self.device, only_action=self.only_action)
         else:
             raise NotImplementedError
 
     def forward(self, x):
         return self.encoder(x)
 
-    def train_on_batch_E(self, obs, next_obs,label, next_label,target_pos, next_target_pos, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu')):
+    def train_on_batch_E(self, obs, next_obs,label, next_label,target_pos, next_target_pos, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu'), only_action=False):
         """
         loss_manager will cumulate the loss (pytorch tensor) of e.g. inverse/forward/reward models, etc.
 
@@ -398,24 +429,24 @@ class CGANTrainer(BaseTrainer):
         # reconstruct_obs, reconstruct_obs_next = self.reconstruct(obs), self.reconstruct(next_obs)
 
         state_pred = self.encoder(obs)
-        reconstruct_obs = self.generator.forward_cgan(state_pred, label, target_pos)
-        reconstruct_obs_next = self.reconstruct(next_obs, next_label, next_target_pos)
+        reconstruct_obs = self.generator.forward_cgan(state_pred, label, target_pos, only_action)
+        reconstruct_obs_next = self.reconstruct(next_obs, next_label, next_target_pos, only_action)
         autoEncoderLoss(obs, reconstruct_obs, next_obs, reconstruct_obs_next, 10000.0, loss_manager)
         AEboundLoss(state_pred, 1.0, loss_manager)
         loss = self.update_nn_weights(optimizer, loss_manager, valid_mode=valid_mode)
         return loss
 
-    def train_on_batch_D(self, obs,label,target_pos, label_valid, label_fake, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu')):
+    def train_on_batch_D(self, obs,label,target_pos, label_valid, label_fake, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu'), only_action=False):
         sample_state = torch.randn((obs.size(0), self.state_dim), requires_grad=False).to(device)
         sample_label = torch.randint(self.label_dim, (obs.size(0),)).to(device)
         sample_t_pos = sample_target_pos(obs.size(0),TARGET_MAX_X, TARGET_MIN_X, TARGET_MAX_Y, TARGET_MIN_Y)
         
-        fake_img = self.generator.forward_cgan(sample_state, sample_label, sample_t_pos)
+        fake_img = self.generator.forward_cgan(sample_state, sample_label, sample_t_pos, only_action)
         # fake_loss
-        fake_img_rating = self.discriminator.forward_cgan(fake_img.detach(), sample_label, sample_t_pos)
+        fake_img_rating = self.discriminator.forward_cgan(fake_img.detach(), sample_label, sample_t_pos, only_action)
         ganNonSaturateLoss(fake_img_rating, label_fake, weight=1.0, loss_manager=loss_manager, name="ns_loss_D_fake")
         # real_loss
-        real_img_rating = self.discriminator.forward_cgan(obs, label, target_pos)
+        real_img_rating = self.discriminator.forward_cgan(obs, label, target_pos, only_action)
         ganNonSaturateLoss(real_img_rating, label_valid, weight=1.0, loss_manager=loss_manager, name="ns_loss_D_real")
         loss = self.update_nn_weights(optimizer, loss_manager, valid_mode=valid_mode)
         acc_pos = ganBCEaccuracy(real_img_rating, label=1)
@@ -423,24 +454,24 @@ class CGANTrainer(BaseTrainer):
         acc = (acc_pos + acc_neg) / 2.
         return loss, acc.item()
 
-    def train_on_batch_G(self, obs, label_valid, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu')):
+    def train_on_batch_G(self, obs, label_valid, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu'), only_action=False):
         sample_state = torch.randn((obs.size(0), self.state_dim), requires_grad=False).to(device)
         sample_label = torch.randint(self.label_dim, (obs.size(0),)).to(device)
         sample_t_pos = sample_target_pos(obs.size(0),TARGET_MAX_X, TARGET_MIN_X, TARGET_MAX_Y, TARGET_MIN_Y)
         
-        fake_img = self.generator.forward_cgan(sample_state,sample_label,sample_t_pos)
-        fake_rating = self.discriminator.forward_cgan(fake_img, sample_label,sample_t_pos)
+        fake_img = self.generator.forward_cgan(sample_state,sample_label,sample_t_pos, only_action)
+        fake_rating = self.discriminator.forward_cgan(fake_img, sample_label,sample_t_pos, only_action)
         ganNonSaturateLoss(fake_rating, label_valid, weight=1.0, loss_manager=loss_manager, name="ns_loss_G")
         loss = self.update_nn_weights(optimizer, loss_manager, valid_mode=valid_mode)
         acc = ganBCEaccuracy(fake_rating, label=1)
         return loss, acc.item()
 
-    def reconstruct(self, x, l, t):
-        return self.generator.forward_cgan(self.encoder(x),l, t)
-    def decode(self, z, l, t):
+    def reconstruct(self, x, l, t, only_action):
+        return self.generator.forward_cgan(self.encoder(x),l, t, only_action)
+    def decode(self, z, l, t, only_action):
         l = l.long().to('cpu')
         t = t.to('cpu')
-        return self.generator.forward_cgan(z,l, t)
+        return self.generator.forward_cgan(z,l, t, only_action)
 
     def train_on_batch(self, obs, next_obs,
                        optimizer_D, optimizer_G, optimizer_E,
@@ -451,7 +482,8 @@ class CGANTrainer(BaseTrainer):
                        batch_size=32,
                        dataloader=None,
                        valid_mode=False,
-                       device=torch.device('cpu')):
+                       device=torch.device('cpu'),
+                       only_action=False):
         # import ipdb; ipdb.set_trace()
         label_valid = torch.ones((batch_size, 1)).to(device)
         label_fake = torch.zeros((batch_size, 1)).to(device)
@@ -469,7 +501,7 @@ class CGANTrainer(BaseTrainer):
                 action = action.to(device)
                 # re-define the length label_valid/label_fake, because obs.size(0) changes
                 d_loss, d_acc = self.train_on_batch_D(obs,action,target_pos, label_valid[:obs.size(0)], label_fake[:obs.size(
-                    0)], optimizer_D, loss_manager_D, valid_mode=valid_mode, device=device)
+                    0)], optimizer_D, loss_manager_D, valid_mode=valid_mode, device=device, only_action=only_action)
                 epoch_loss_D += d_loss
                 epoch_batches_D += 1
                 acc_cum += d_acc
@@ -485,7 +517,7 @@ class CGANTrainer(BaseTrainer):
                 obs = obs.to(device)
                 # re-define the length label_valid, because obs.size(0) changes
                 g_loss, g_acc = self.train_on_batch_G(obs,label_valid[:obs.size(
-                    0)], optimizer_G, loss_manager_G, valid_mode=valid_mode, device=device)
+                    0)], optimizer_G, loss_manager_G, valid_mode=valid_mode, device=device, only_action=only_action)
                 epoch_loss_G += g_loss
                 epoch_batches_G += 1
                 acc_cum += g_acc
@@ -500,7 +532,7 @@ class CGANTrainer(BaseTrainer):
             action, next_action = action.to(device), next_action.to(device)
             cls_gt = cls_gt.to(device)
             e_loss = self.train_on_batch_E(
-                obs, next_obs,action, next_action, target_pos, next_target_pos, optimizer_E, loss_manager_E, valid_mode=valid_mode, device=device)
+                obs, next_obs,action, next_action, target_pos, next_target_pos, optimizer_E, loss_manager_E, valid_mode=valid_mode, device=device, only_action=only_action)
             epoch_loss_E += e_loss
             epoch_batches_E += 1
         if not valid_mode:

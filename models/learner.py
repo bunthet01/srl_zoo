@@ -57,7 +57,7 @@ class BaseLearner(object):
     :param cuda: (int) (default -1, CPU) equi to CUDA_VISIBLE_DEVICES
     """
 
-    def __init__(self, state_dim, class_dim, batch_size, seed=1, cuda=-1, use_conditional_model=False):
+    def __init__(self, state_dim, class_dim, batch_size, seed=1, cuda=-1, use_conditional_model=False, only_action=False):
         super(BaseLearner, self).__init__()
         self.state_dim = state_dim
         self.class_dim = class_dim
@@ -66,6 +66,7 @@ class BaseLearner(object):
         self.seed = seed
         self.use_dae = False
         self.use_conditional_model = use_conditional_model
+        self.only_action = only_action
         assert not self.use_dae, "Not implemented error."
         # Seed the random generator
         np.random.seed(seed)
@@ -86,7 +87,7 @@ class BaseLearner(object):
         """
         # Move the tensor back to the cpu
         if use_conditional_model:
-            return detachToNumpy(self.module.model(observations, action, target_pos))
+            return detachToNumpy(self.module.model(observations, action, target_pos, self.only_action))
         else:
             return detachToNumpy(self.module.model(observations))
 
@@ -120,7 +121,7 @@ class BaseLearner(object):
                 if self.use_conditional_model:
                     action =  action.to(self.device)
                     target_pos  = target_pos.to(self.device)
-                    states = self.module.model(obs, action, target_pos)
+                    states = self.module.model(obs, action, target_pos, self.only_action)
                 else:
                     states = self.module.model(obs)
                 if split_dim_list is not None:
@@ -129,7 +130,7 @@ class BaseLearner(object):
             if self.use_conditional_model:
                 next_action = next_action.to(self.device)
                 next_target_pos = next_target_pos.to(self.device)
-                states_next = self.module.model(obs_next, next_action, next_target_pos)
+                states_next = self.module.model(obs_next, next_action, next_target_pos, self.only_action)
             else:
                 states_next = self.module.model(obs_next)
             if split_dim_list is not None:
@@ -216,12 +217,12 @@ class SRL4robotics(BaseLearner):
     :param pretrained_weights_path: SRL pretrained model weights path (default: None)
     """
 
-    def __init__(self, state_dim, class_dim, img_shape=None, model_type="resnet", inverse_model_type="linear", log_folder="logs/default",
+    def __init__(self, state_dim, class_dim, img_shape=None, model_type="resnet", inverse_model_type="linear", ls=False,add_noise=False,only_action=False,                                                  pretrained_weights_path=None,debug=False,log_folder="logs/default",
                  seed=1, learning_rate=0.001, learning_rate_gan=(0.001, 0.001), l1_reg=0.0, l2_reg=0.0, cuda=-1,
                  multi_view=False, losses=None, losses_weights_dict=None, n_actions=6, beta=1, Cmax=50, use_cci=False,
-                 split_dimensions=-1, path_to_dae=None, state_dim_dae=200, occlusion_percentage=None, ls=False,add_noise=False, pretrained_weights_path=None,debug=False):
+                 split_dimensions=-1, path_to_dae=None, state_dim_dae=200, occlusion_percentage=None):
 
-        super(SRL4robotics, self).__init__(state_dim, class_dim, BATCH_SIZE, seed, cuda, use_conditional_model="cvae" in losses)
+        super(SRL4robotics, self).__init__(state_dim, class_dim, BATCH_SIZE, seed, cuda, use_conditional_model="cvae" in losses, only_action=only_action)
 
         self.multi_view = multi_view
         self.losses = losses
@@ -231,6 +232,7 @@ class SRL4robotics(BaseLearner):
         self.Cmax = Cmax
         self.ls = ls
         self.add_noise = add_noise
+        self.only_action = only_action
         self.denoiser = None
         self.img_shape = img_shape
         self.model_type = model_type
@@ -265,7 +267,7 @@ class SRL4robotics(BaseLearner):
             else:
                 self.use_split = False
             self.module = SRLModules(state_dim=self.state_dim, class_dim = self.class_dim, img_shape=self.img_shape, action_dim=self.dim_action, model_type=model_type,
-                                     losses=losses, split_dimensions=split_dimensions, inverse_model_type=inverse_model_type, device=self.device)
+                                     losses=losses, split_dimensions=split_dimensions, inverse_model_type=inverse_model_type, device=self.device, only_action=self.only_action)
         else:
             raise ValueError("Unknown model: {}".format(model_type))
 
@@ -557,7 +559,7 @@ class SRL4robotics(BaseLearner):
                             next_action = next_action.to(self.device)
                             target_pos = target_pos.to(self.device)
                             next_target_pos = next_target_pos.to(self.device)
-                            states, next_states = self.module.model(obs, action,target_pos), self.module.model(next_obs, next_action,next_target_pos)
+                            states, next_states = self.module.model(obs, action,target_pos, self.only_action), self.module.model(next_obs, next_action,next_target_pos,self.only_action)
                             actions_st = action.view(-1, 1).to(self.device)
                         else:
                             states, next_states = self.module(obs), self.module(next_obs)
@@ -652,7 +654,7 @@ class SRL4robotics(BaseLearner):
                                                                                                fixed_sample_target_pos, self.optimizer_D, 
                                                                                                self.optimizer_G, loss_manager_D, 
                                                                                                loss_manager_G , valid_mode=valid_mode, 
-                                                                                               device=self.device, label_smoothing=self.ls,add_noise=self.add_noise, minibatch=n_batch_per_epoch)
+                                                                                               device=self.device, label_smoothing=self.ls,add_noise=self.add_noise,only_action=self.only_action, minibatch=n_batch_per_epoch)
                                 
                             epoch_loss_D +=loss_D
                             epoch_loss_G +=loss_G
@@ -677,7 +679,7 @@ class SRL4robotics(BaseLearner):
                                                                                     batch_size=self.batch_size, 
                                                                                     dataloader=dataloader,
                                                                                     valid_mode=valid_mode,
-                                                                                    device=self.device)
+                                                                                    device=self.device,only_action = self.only_action)
                             epoch_loss += loss
                             epoch_batches += 1 ## update batch count
                             if not valid_mode:
@@ -698,7 +700,7 @@ class SRL4robotics(BaseLearner):
                             # Custom/Optional plots: training too long, display/save img during training.
                             if iter_ind % 20 == 0 and not valid_mode:
                                 if self.use_cgan:
-                                    reconstruct_obs = self.module.model.reconstruct(obs, action, target_pos)
+                                    reconstruct_obs = self.module.model.reconstruct(obs, action, target_pos, self.only_action)
                                 else:
                                     reconstruct_obs = self.module.model.reconstruct(obs)
                                 # , normalize=True, range=(0,1)
@@ -726,7 +728,7 @@ class SRL4robotics(BaseLearner):
                             next_action = next_action.to(self.device)
                             target_pos = target_pos.to(self.device)
                             next_target_pos = next_target_pos.to(self.device)
-                            loss = self.module.model.train_on_batch(obs, next_obs, action, next_action,target_pos, next_target_pos, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c )
+                            loss = self.module.model.train_on_batch(obs, next_obs, action, next_action,target_pos, next_target_pos, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c,self.only_action )
                         elif self.use_vae:
                             loss = self.module.model.train_on_batch(obs, next_obs, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c)
                         else:
@@ -943,7 +945,7 @@ class SRL4robotics(BaseLearner):
                                 # Plot Reconstructed Image
                                 if obs[0].shape[0] == 3:  # RGB
                                     if self.use_cvae or self.use_cgan:
-                                        reconstruct_obs = self.module.model.reconstruct(obs, action.to(self.device), target_pos.to(self.device))
+                                        reconstruct_obs = self.module.model.reconstruct(obs, action.to(self.device), target_pos.to(self.device),self.only_action)
                                     else:
                                         reconstruct_obs = self.module.model.reconstruct(obs)
                                     # , normalize=True, range=(0,1)
