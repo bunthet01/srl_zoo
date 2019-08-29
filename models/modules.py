@@ -1,6 +1,7 @@
 from .autoencoders import AutoEncoderTrainer
 from .vae import VAETrainer
 from .cvae import CVAETrainer
+from .cvae_new import CVAE_NEW_Trainer
 from .forward_inverse import BaseForwardModel, BaseInverseModel, BaseRewardModel, BaseRewardModel2, BasicTrainer, SelfSupClassfier
 from .priors import SRLConvolutionalNetwork, SRLDenseNetwork, SRLLinear
 from .triplet import EmbeddingNet
@@ -102,6 +103,10 @@ class SRLModules(BaseForwardModel, BaseInverseModel, BaseRewardModel, BaseReward
         elif "cvae" in losses:
             self.model = CVAETrainer(state_dim=state_dim, class_dim=class_dim, img_shape=img_shape, device=device, only_action=only_action)
             self.model.build_model(model_type=model_type)
+        elif "cvae_new" in losses:
+            self.model = CVAE_NEW_Trainer(state_dim=state_dim, img_shape=img_shape, device=device)
+            self.model.build_model(model_type=model_type)
+
             
 
         # elif losses is not None and "triplet" in losses:

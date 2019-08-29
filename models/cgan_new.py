@@ -1,3 +1,5 @@
+# The difference between cgan.py and cgan_new.py is the training process. In cgan.py, we can add the encoder on top of gan to help the generator generate more realistic  images. And the training process is different. In cgan.py, the training step of generator and discriminator change depend the accuray of each neural network. The dataloader is pass to "train_on_batch" which slow down the training. In cgan_new.py, the training is done is the traditional way, so faster to train
+
 import numpy as np
 import torch
 from torch import nn
@@ -23,6 +25,11 @@ except:
 from torchsummary import summary
 
 class GeneratorUnet(nn.Module):
+    """
+    GeneratorUnet. Two conditions are used : action and target_position.
+    Parameter "only_action" is used to use only "action" as condition.
+    :param label_dim: (th.Tensor) dimension of the action.
+    """
     def __init__(self, state_dim, img_shape, label_dim,
                  unet_depth=2,  # 3
                  unet_ch=16,  # 32
@@ -50,14 +57,14 @@ class GeneratorUnet(nn.Module):
                     self.state_dim + self.label_dim, np.prod(self.img_shape), bias=True)
             else: 
                 self.first = LinearSN(
-                    self.state_dim + self.label_dim+2, np.prod(self.img_shape), bias=True)
+                    self.state_dim + self.label_dim+2, np.prod(self.img_shape), bias=True)  # dimension of target_position is 2
         else:
             if self.only_action:
                 self.first = nn.Linear(
                     self.state_dim + self.label_dim, np.prod(self.img_shape), bias=True)
             else:
                 self.first = nn.Linear(
-                    self.state_dim + self.label_dim+2, np.prod(self.img_shape), bias=True)
+                    self.state_dim + self.label_dim+2, np.prod(self.img_shape), bias=True)  # dimension of target_position is 2
 
             # state_layer = Dense(np.prod(self.img_shape), activation=None)(state_input)
         self.activations = nn.ModuleDict([
@@ -81,6 +88,13 @@ class GeneratorUnet(nn.Module):
                 prev_channels, out_channels, kernel_size=3, stride=1, padding=1)
 
     def forward_cgan(self, x, l, t, only_action):
+        """
+        :param x:(th.Tensor)
+        :param l:(th.Tensor) label or action
+        :param t:(th.Tensor) target position
+        :param only_action: (boolean)
+        
+        """
         l = one_hot(l).to(self.device)
         if only_action:
             x = torch.cat([x, l], 1)
@@ -97,7 +111,9 @@ class GeneratorUnet(nn.Module):
 
 class GeneratorResNet(BaseModelAutoEncoder):
     """
-    ResNet Generator
+    ResNet Generator. Two conditions are used : action and target_position.
+    Parameter "only_action" is used to use only "action" as condition.
+    :param label_dim: (th.Tensor) dimension of the action.
     """
 
     def __init__(self, state_dim, img_shape, label_dim, spectral_norm=False, device='cpu', only_action=False):
@@ -111,7 +127,7 @@ class GeneratorResNet(BaseModelAutoEncoder):
         self.label_dim = label_dim
         self.spectral_norm = spectral_norm
 
-        outshape = summary(self.encoder_conv, self.img_shape, show=False) # [-1, channels, high, width] # [-1,64,1,1]
+        outshape = summary(self.encoder_conv, self.img_shape, show=False) # [-1, channels, high, width] 
         self.in_height, self.in_width = outshape[-2:]
         if self.only_action:
             self.decoder_fc = nn.Sequential(
@@ -163,6 +179,13 @@ class GeneratorResNet(BaseModelAutoEncoder):
                 nn.Tanh()
             )
     def forward_cgan(self, x, l, t, only_action):
+        """
+        :param x:(th.Tensor)
+        :param l:(th.Tensor) label or action
+        :param t:(th.Tensor) target position
+        :param only_action: (boolean)
+        
+        """
         if only_action: 
             decoded = torch.cat([x, one_hot(l).to(self.device)], 1)
         else:          
@@ -173,6 +196,11 @@ class GeneratorResNet(BaseModelAutoEncoder):
     
         
 class Discriminator(nn.Module):
+        """
+        Discriminator. Two conditions are used : action and target_position.
+        Parameter "only_action" is used to use only "action" as condition.
+        :param label_dim: (th.Tensor) dimension of the action.
+        """
     def __init__(self, state_dim, img_shape,label_dim,
                  spectral_norm=False,device='cpu',only_action=False,
                  d_chs=16):  # 32
@@ -227,7 +255,7 @@ class Discriminator(nn.Module):
             self.modules_list.append(ConvSN2d(self.d_chs*8, self.d_chs*4,
                                               kernel_size=3, stride=1, padding=1))
 
-            last_channels = self.modules_list[-1].out_channels   #64
+            last_channels = self.modules_list[-1].out_channels   
             times = COUNT_IMG_REDUCE
             in_features = last_channels * \
                 (self.img_shape[1]//2**times) * (self.img_shape[2]//2**times)  
@@ -251,6 +279,13 @@ class Discriminator(nn.Module):
                 self.last = nn.Linear(self.state_dim+self.label_dim+2, 1, bias=True)
 
     def forward_cgan(self, x, l, t, only_action):
+        """
+        :param x:(th.Tensor)
+        :param l:(th.Tensor) label or action
+        :param t:(th.Tensor) target position
+        :param only_action: (boolean)
+        
+        """
         for layer in self.modules_list:
             x = layer(x)
         x = x.view(x.size(0), -1)  # flatten
@@ -267,6 +302,12 @@ class Discriminator(nn.Module):
 
 # The DiscriminatorDC and GeneratorDC is inspired by https://github.com/pytorch/examples/tree/master/dcgan
 class DiscriminatorDC(nn.Module):
+    """
+    Deep convolutional discriminator.
+    Two conditions are used : action and target_position.
+    Parameter "only_action" is used to use only "action" as condition.
+    :param label_dim: (th.Tensor) dimension of the action.
+    """
     def __init__(self, state_dim, label_dim, img_shape,spectral_norm=False,device='cpu',only_action=False):
         super(DiscriminatorDC, self).__init__()
         assert img_shape[0] < 10, "Pytorch uses 'channel first' convention."
@@ -285,95 +326,90 @@ class DiscriminatorDC(nn.Module):
         if spectral_norm:
             if self.only_action:
                 self.conv1_1 = nn.Sequential(
-                    # input is (nc) x 64 x 64
                     ConvSN2d(nc, int(ndf/2), 4, 2, 1, bias=False),
                     nn.LeakyReLU(0.2, inplace=True))
                 self.conv1_2 = nn.Sequential(
-                    # input is (label_dim) x 1 x 1
                     ConvSN2d(label_dim, int(ndf/2), 4, 2, 1, bias=False),
                     nn.LeakyReLU(0.2, inplace=True)
                     )
             else:
                 self.conv1_1 = nn.Sequential(
-                    # input is (nc) x 64 x 64
                     ConvSN2d(nc, int(ndf/2), 4, 2, 1, bias=False),
                     nn.LeakyReLU(0.2, inplace=True))
                 self.conv1_2 = nn.Sequential(
-                    # input is (label_dim) x 1 x 1
                     ConvSN2d(label_dim, int(ndf/4), 4, 2, 1, bias=False),
                     nn.LeakyReLU(0.2, inplace=True)
                     )
                 self.conv1_3 = nn.Sequential(
-                    # input is (label_dim) x 1 x 1
                     ConvSN2d(1, int(ndf/4), 4, 2, 1, bias=False),
                     nn.LeakyReLU(0.2, inplace=True)
                     )
             self.conv2 = nn.Sequential(
-                # state size. (ndf) x 32 x 32
                 ConvSN2d(ndf, ndf * 2, 4, 2, 1, bias=False),
                 nn.BatchNorm2d(ndf * 2),
                 nn.LeakyReLU(0.2, inplace=True),
-                # state size. (ndf*2) x 16 x 16
+
                 ConvSN2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
                 nn.BatchNorm2d(ndf * 4),
                 nn.LeakyReLU(0.2, inplace=True),
-                # state size. (ndf*4) x 8 x 8
+
                 ConvSN2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
                 nn.BatchNorm2d(ndf * 8),
                 nn.LeakyReLU(0.2, inplace=True),
-                # state size. (ndf*8) x 4 x 4
+
                 ConvSN2d(ndf * 8, 1, 4, 1, 0, bias=False),
                 nn.Sigmoid()
-                # state size. (1x1x1)
+
 
                 )
         else:
             if self.only_action:
                 self.conv1_1 = nn.Sequential(
-                    # input is (nc) x 64 x 64
                     nn.Conv2d(nc, int(ndf/2), 4, 2, 1, bias=False),
                     nn.LeakyReLU(0.2, inplace=True))
                 self.conv1_2 = nn.Sequential(
-                    # input is (label_dim) x 1 x 1
                     nn.Conv2d(label_dim, int(ndf/2), 4, 2, 1, bias=False),
                     nn.LeakyReLU(0.2, inplace=True)
                     )
             else:
                 self.conv1_1 = nn.Sequential(
-                    # input is (nc) x 64 x 64
                     nn.Conv2d(nc, int(ndf/2), 4, 2, 1, bias=False),
                     nn.LeakyReLU(0.2, inplace=True))
                 self.conv1_2 = nn.Sequential(
-                    # input is (label_dim) x 1 x 1
                     nn.Conv2d(label_dim, int(ndf/4), 4, 2, 1, bias=False),
                     nn.LeakyReLU(0.2, inplace=True)
                     )
                 self.conv1_3 = nn.Sequential(
-                    # input is (label_dim) x 1 x 1
                     nn.Conv2d(1, int(ndf/4), 4, 2, 1, bias=False),
                     nn.LeakyReLU(0.2, inplace=True)
                     )
             self.conv2 = nn.Sequential(
-                # state size. (ndf) x 32 x 32
                 nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
                 nn.BatchNorm2d(ndf * 2),
                 nn.LeakyReLU(0.2, inplace=True),
-                # state size. (ndf*2) x 16 x 16
+                
                 nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
                 nn.BatchNorm2d(ndf * 4),
                 nn.LeakyReLU(0.2, inplace=True),
-                # state size. (ndf*4) x 8 x 8
+
                 nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
                 nn.BatchNorm2d(ndf * 8),
                 nn.LeakyReLU(0.2, inplace=True),
-                # state size. (ndf*8) x 4 x 4
+
                 nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False),
                 nn.Sigmoid()
-                # state size. (1x1x1)
+
 
                 )
 
     def forward_cgan(self, input, label, target, only_action):
+        """
+        :param input: (th.Tensor)
+        :param label: (th.Tensor) label or action
+        :param target: (th.Tensor) target position
+        :param only_action: (boolean)
+        
+        """
         label = self.fill[label].to(self.device)
         target = gaussian_target(self.img_shape, target, MAX_X, MIN_X, MAX_Y, MIN_Y).float().to(self.device)
         x = self.conv1_1(input)
@@ -406,96 +442,90 @@ class GeneratorDC(nn.Module):
         if spectral_norm:
             if self.only_action:
                 self.deconv1_1 = nn.Sequential(
-                    # input is Z, going into a convolution
                     ConvTransposeSN2d(nz, ngf * 4, 4, 1, 0, bias=False),
                     nn.BatchNorm2d(ngf * 4),
                     nn.ReLU(True))
                 self.deconv1_2 = nn.Sequential(
-                    # input is Z, going into a convolution
                     ConvTransposeSN2d(label_dim,ngf * 4, 4, 1, 0, bias=False),
                     nn.BatchNorm2d(ngf * 4),
                     nn.ReLU(True))
             else:
                 self.deconv1_1 = nn.Sequential(
-                    # input is Z, going into a convolution
                     ConvTransposeSN2d(nz, ngf * 4, 4, 1, 0, bias=False),
                     nn.BatchNorm2d(ngf * 4),
                     nn.ReLU(True))
                 self.deconv1_2 = nn.Sequential(
-                    # input is Z, going into a convolution
                     ConvTransposeSN2d(label_dim,ngf * 2, 4, 1, 0, bias=False),
                     nn.BatchNorm2d(ngf * 2),
                     nn.ReLU(True))
                 self.deconv1_3 = nn.Sequential(
-                    # input is Z, going into a convolution
                     ConvTransposeSN2d(2,ngf * 2, 4, 1, 0, bias=False),
                     nn.BatchNorm2d(ngf * 2),
                     nn.ReLU(True))
             self.deconv2 = nn.Sequential(
-                # state size. (ngf*8) x 4 x 4
                 ConvTransposeSN2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
                 nn.BatchNorm2d(ngf * 4),
                 nn.ReLU(True),
-                # state size. (ngf*4) x 8 x 8
+
                 ConvTransposeSN2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
                 nn.BatchNorm2d(ngf * 2),
                 nn.ReLU(True),
-                # state size. (ngf*2) x 16 x 16
+
                 ConvTransposeSN2d(ngf * 2,     ngf, 4, 2, 1, bias=False),
                 nn.BatchNorm2d(ngf),
                 nn.ReLU(True),
-                # state size. (ngf) x 32 x 32
+
                 ConvTransposeSN2d(ngf, nc, 4, 2, 1, bias=False),
                 nn.Tanh()
-                # state size. (nc) x 64 x 64)
                 ) 
         else:
             if self.only_action:
                 self.deconv1_1 = nn.Sequential(
-                    # input is Z, going into a convolution
                     nn.ConvTranspose2d(nz, ngf * 4, 4, 1, 0, bias=False),
                     nn.BatchNorm2d(ngf * 4),
                     nn.ReLU(True))
                 self.deconv1_2 = nn.Sequential(
-                    # input is Z, going into a convolution
                     nn.ConvTranspose2d(label_dim,ngf * 4, 4, 1, 0, bias=False),
                     nn.BatchNorm2d(ngf * 4),
                     nn.ReLU(True))
             else:
                 self.deconv1_1 = nn.Sequential(
-                    # input is Z, going into a convolution
                     nn.ConvTranspose2d(nz, ngf * 4, 4, 1, 0, bias=False),
                     nn.BatchNorm2d(ngf * 4),
                     nn.ReLU(True))
                 self.deconv1_2 = nn.Sequential(
-                    # input is Z, going into a convolution
                     nn.ConvTranspose2d(label_dim,ngf * 2, 4, 1, 0, bias=False),
                     nn.BatchNorm2d(ngf * 2),
                     nn.ReLU(True))
                 self.deconv1_3 = nn.Sequential(
-                    # input is Z, going into a convolution
                     nn.ConvTranspose2d(2,ngf * 2, 4, 1, 0, bias=False),
                     nn.BatchNorm2d(ngf * 2),
                     nn.ReLU(True))
             self.deconv2 = nn.Sequential(
-                # state size. (ngf*8) x 4 x 4
                 nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
                 nn.BatchNorm2d(ngf * 4),
                 nn.ReLU(True),
-                # state size. (ngf*4) x 8 x 8
+
                 nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
                 nn.BatchNorm2d(ngf * 2),
                 nn.ReLU(True),
-                # state size. (ngf*2) x 16 x 16
+
                 nn.ConvTranspose2d(ngf * 2,     ngf, 4, 2, 1, bias=False),
                 nn.BatchNorm2d(ngf),
                 nn.ReLU(True),
-                # state size. (ngf) x 32 x 32
+
                 nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
                 nn.Tanh()
-                # state size. (nc) x 64 x 64)
+
                 )   
     def forward_cgan(self,input, label, target, only_action):
+        """
+        :param input: (th.Tensor)
+        :param label: (th.Tensor) label or action
+        :param target: (th.Tensor) target position
+        :param only_action: (boolean)
+        
+        """
         input = input.view(input.size(0), input.size(1),1,1).to(self.device)
         label = self.one_hot[label].to(self.device)
         target = target[...,None][...,None].to(self.device)
@@ -553,6 +583,7 @@ class CGanNewTrainer(BaseTrainer):
         err = criterion(output, label)
         loss_manager.addToLosses(name, weight, err)
         return weight*err
+        
     def decode(self, z, l, t, only_action):
         l = l.long().to('cpu')
         t = t.to('cpu')
@@ -574,7 +605,7 @@ class CGanNewTrainer(BaseTrainer):
         
         # train with real
         if label_smoothing:
-            #real_label = torch.FloatTensor(batch_size,).uniform_(0.7,1.2).to(device)
+            #real_label = torch.FloatTensor(batch_size,).uniform_(0.7,1.2).to(device)   
             real_label = torch.full((batch_size,), 0.9, device=device)
         else:
             real_label = torch.full((batch_size,), 1, device=device)

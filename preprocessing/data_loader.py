@@ -1,3 +1,4 @@
+
 from __future__ import print_function, division, absolute_import
 
 import glob
@@ -364,7 +365,7 @@ class DataLoader(object):
 
 
 class DataLoaderConditional(object):
-    def __init__(self, minibatchlist,actions,task, generative_model_state_dim,TARGET_MAX_X, TARGET_MIN_X, TARGET_MAX_Y, TARGET_MIN_Y, seed, max_queue_len=4, infinite_loop=True):
+    def __init__(self, minibatchlist,actions,task, generative_model_state_dim,TARGET_MAX_X, TARGET_MIN_X, TARGET_MAX_Y, TARGET_MIN_Y, MAX_X, MIN_X, MAX_Y, MIN_Y,grid_walker, grid_list,target_pos_list, seed, max_queue_len=4, infinite_loop=True):
         """
         A Custom dataloader preparing data to forward to Conditional model   
         :param n_workers: (int) number of preprocessing worker (load and preprocess each image)
@@ -382,6 +383,17 @@ class DataLoaderConditional(object):
         self.TARGET_MIN_X = TARGET_MIN_X
         self.TARGET_MAX_Y = TARGET_MAX_Y
         self.TARGET_MIN_Y = TARGET_MIN_Y
+        
+        self.MAX_X = MAX_X
+        self.MIN_X = MIN_X
+        self.MAX_Y = MAX_Y
+        self.MIN_Y = MIN_Y
+        
+        # For grid walker
+        self.grid_walker = grid_walker
+        self.grid_list =grid_list
+        self.target_pos_list = target_pos_list
+        
         self.actions = actions
         self.generative_model_state_dim = generative_model_state_dim
         self.queue = Queue(max_queue_len)
@@ -423,7 +435,7 @@ class DataLoaderConditional(object):
             start = False    
             indices = np.arange(len(self.minibatchlist), dtype=np.int64)
             for minibatch_idx in indices:
-                batch = self._makeBatchElement(minibatch_idx, self.minibatchlist, self.generative_model_state_dim, self.actions,self.task, self.seed, self.TARGET_MAX_X, self.TARGET_MIN_X,self.TARGET_MAX_Y, self.TARGET_MIN_Y )
+                batch = self._makeBatchElement(minibatch_idx, self.minibatchlist, self.generative_model_state_dim, self.actions,self.task, self.seed, self.TARGET_MAX_X, self.TARGET_MIN_X,self.TARGET_MAX_Y, self.TARGET_MIN_Y,self.MAX_X, self.MIN_X,self.MAX_Y, self.MIN_Y, self.grid_walker, self.grid_list, self.target_pos_list)
                 self.queue.put(batch)
 
                 # Free memory
@@ -432,24 +444,82 @@ class DataLoaderConditional(object):
             self.queue.put(None)
 
     @classmethod
-    def _makeBatchElement(cls, minibatch_idx, minibatchlist, generative_model_state_dim, actions,task, seed, TARGET_MAX_X, TARGET_MIN_X,TARGET_MAX_Y, TARGET_MIN_Y ):
+    def _makeBatchElement(cls, minibatch_idx, minibatchlist, generative_model_state_dim, actions,task, seed, TARGET_MAX_X, TARGET_MIN_X,TARGET_MAX_Y, TARGET_MIN_Y,MAX_X, MIN_X, MAX_Y, MIN_Y, grid_walker, grid_list, target_pos_list ):
         """
         """
         np.random.seed(seed+minibatch_idx)
         z = th.from_numpy(np.random.normal(0,1,(minibatchlist[minibatch_idx].shape[0], generative_model_state_dim))).float()
-        actions = th.FloatTensor(actions[minibatchlist[minibatch_idx]])
-        if task == 'sc':
-            random_init_x = np.random.random_sample(minibatchlist[minibatch_idx].shape[0]) * (TARGET_MAX_X - TARGET_MIN_X) + \
-                        TARGET_MIN_X
-            random_init_y = np.random.random_sample(minibatchlist[minibatch_idx].shape[0]) * (TARGET_MAX_Y - TARGET_MIN_Y) + \
-                        TARGET_MIN_Y
+        ## Add a fix z instead of random z
+       #  z = []
+       #  z_0 = [-0.9669311 , -1.7317313 , -0.05010746,  0.43163386,  0.57693458,
+       #  0.81835371, -2.35364032, -1.00514448,  0.1066523 ,  1.51900327,
+       #  0.78374451,  1.90134001, -0.52493942,  0.27441698, -1.09997082,
+       # -0.40435222, -0.73529571, -0.63398868, -0.39344913,  0.00271754,
+       #  0.02221266,  0.54345345,  0.13998847, -0.34404564, -0.52257854,
+       # -0.30713171, -0.44903713,  0.49097106,  0.86552519,  1.27404451,
+       # -0.79770279,  0.46937221, -1.39467967,  0.37317473,  1.08267224,
+       # -0.14958951,  1.07263601, -1.13856792, -0.88864529, -0.13580984,
+       #  1.02221036, -0.41742945, -0.45355311, -0.99162835,  0.20288104,
+       #  1.24669516,  0.70068014,  0.69665068, -0.20697448, -0.56330937,
+       #  0.67724591, -0.03191108, -0.17360823,  0.89824063, -0.19778745,
+       # -0.83777624,  0.90918851,  0.08071989, -1.03702939, -1.11290586,
+       #  0.09541187,  2.33740973, -0.3928206 , -0.33627385,  1.52377117,
+       # -0.0572812 , -1.4484669 , -1.57279646,  1.22666395,  0.66635454,
+       #  0.82612568, -0.05775656, -0.72671205, -0.21716312,  0.13603121,
+       # -0.83831114,  0.56144989, -1.25959611, -0.33275875, -0.20400788,
+       # -0.69101983, -2.20550537,  0.44786966, -0.75575078,  1.32570791,
+       # -0.34198228, -0.5413596 ,  0.09152195,  1.05343974, -0.56340766,
+       #  1.01473773,  1.44030368,  0.99032283,  1.62643147,  1.29264605,
+       #  1.51488233,  1.60432637,  0.20806953, -0.4292239 , -2.26224375,
+       # -1.32273316, -0.44828281, -0.38173509, -0.15279447, -1.00076044,
+       # -1.59577763, -0.13022317, -0.18941793, -0.80755407, -0.74215215,
+       # -0.94015658, -0.39652374, -0.8563028 ,  1.2598753 ,  0.24099673,
+       # -0.97231793, -0.28044778, -1.18028557,  1.01216829,  1.38418674,
+       #  1.252002  , -1.14469266, -0.09126702, -0.40157068,  0.56201309,
+       # -1.00790977, -0.6758917 , -0.41321704,  0.15328847,  0.69412869,
+       # -0.32872769,  0.66396505,  0.82207638, -0.21321523, -1.24565816,
+       # -1.17119038,  0.59172696, -0.47622442, -1.71262932,  0.61295235,
+       #  0.12955453, -1.40596712,  1.17941999,  0.83663601,  0.13874525,
+       # -1.27431941, -1.40233052, -0.3070685 , -1.71391535,  0.40508026,
+       # -1.41082335,  0.16491273, -0.28813145,  0.71178526, -0.93794757,
+       #  0.27372944, -1.39484024,  0.79554957, -0.11496177,  0.49585068,
+       # -1.32052529,  0.49908426,  0.3062034 ,  0.36369789,  0.31263396,
+       # -0.19346388,  1.24129927, -0.15589799, -0.73916918, -0.05872619,
+       # -0.95051795, -0.46399641, -0.17724662, -0.37955412,  0.19939707,
+       #  1.94576144,  0.57094985,  1.07230067, -0.50370944, -0.58701628,
+       # -0.37817806,  0.85288912, -2.1481185 , -1.03316474,  0.10233585,
+       # -0.22409236,  1.96772969,  0.44768322, -0.66219145, -1.57760704,
+       # -0.34056005, -1.30322003,  0.46675065,  0.16110632,  0.32003194,
+       #  2.07917666, -0.90746599, -0.19240421, -1.21251571, -0.08059852]
+       #  for _ in range(minibatchlist[minibatch_idx].shape[0]):
+       #      z.append(z_0)
+       #  z = th.FloatTensor(z)
+       
+        
+        if not grid_walker:
+            actions = th.FloatTensor(actions[minibatchlist[minibatch_idx]])
+            if task == 'sc':
+                random_init_x = np.random.random_sample(minibatchlist[minibatch_idx].shape[0]) * (TARGET_MAX_X - TARGET_MIN_X) + \
+                            TARGET_MIN_X
+                random_init_y = np.random.random_sample(minibatchlist[minibatch_idx].shape[0]) * (TARGET_MAX_Y - TARGET_MIN_Y) + \
+                            TARGET_MIN_Y
+            else:
+                random_init_x = np.zeros(minibatchlist[minibatch_idx].shape[0])
+                random_init_y = np.zeros(minibatchlist[minibatch_idx].shape[0])
+            init_robot_x = np.random.random_sample(minibatchlist[minibatch_idx].shape[0]) * (MAX_X - MIN_X) + \
+                            MIN_X
+            init_robot_y = np.random.random_sample(minibatchlist[minibatch_idx].shape[0]) * (MAX_Y - MIN_Y) + \
+                        MIN_Y
+            
+        
+            target_pos = th.FloatTensor(np.concatenate((random_init_x[...,None], random_init_y[...,None]),axis=1))
+            robot_pos = th.FloatTensor(np.concatenate((init_robot_x[...,None], init_robot_y[...,None]),axis=1))
+            return (z, actions, target_pos, robot_pos)
         else:
-            random_init_x = np.zeros(minibatchlist[minibatch_idx].shape[0])
-            random_init_y = np.zeros(minibatchlist[minibatch_idx].shape[0])
-        target_pos = th.FloatTensor(np.concatenate((random_init_x[...,None], random_init_y[...,None]),axis=1))
-
-        return (z, actions, target_pos)
-
+            target_pos = th.FloatTensor(target_pos_list[minibatchlist[minibatch_idx]])
+            robot_pos = th.FloatTensor(grid_list[minibatchlist[minibatch_idx]])
+            return (z, th.zeros(1), target_pos, robot_pos) 
+        
     def __len__(self):
         return self.n_minibatches
 
@@ -583,7 +653,7 @@ class RobotEnvDataset(torch.utils.data.Dataset):
         Set to false, it will only output one th.Tensor.
     """
 
-    def __init__(self, sample_indices, images_path, actions, all_imgs_target_pos, rewards, episode_starts,
+    def __init__(self, sample_indices, images_path, actions, all_imgs_target_pos,relative_positions, rewards, episode_starts,
                  img_shape=None,
                  mode=1,
                  multi_view=False,
@@ -597,6 +667,7 @@ class RobotEnvDataset(torch.utils.data.Dataset):
         self.sample_indices = sample_indices
         self.images_path = images_path
         self.all_imgs_target_pos = all_imgs_target_pos
+        self.relative_positions = relative_positions
         self.actions = actions
         self.rewards = rewards
         self.episode_starts = episode_starts
@@ -650,14 +721,17 @@ class RobotEnvDataset(torch.utils.data.Dataset):
                 next_action = self.actions[index+1]
                 target_pos = self.all_imgs_target_pos[index]
                 next_target_pos = self.all_imgs_target_pos[index+1]
+                robot_pos = self.relative_positions[index]
+                next_robot_pos = self.relative_positions[index+1]
                 reward = self.rewards[index]
                 cls_gt = self.class_labels[index]
-                return index, img.astype(self.dtype), img_next.astype(self.dtype), action, next_action, reward, cls_gt, target_pos, next_target_pos
+                return index, img.astype(self.dtype), img_next.astype(self.dtype), action, next_action, reward, cls_gt, target_pos, next_target_pos, robot_pos, next_robot_pos
             elif self.mode == 0:
                 img = self._get_one_img(image_path)
                 action = self.actions[index]
                 target_pos = self.all_imgs_target_pos[index]
-                return img.astype(self.dtype), action, target_pos
+                robot_pos = self.relative_positions[index]
+                return img.astype(self.dtype), action, target_pos,  robot_pos
             elif self.mode == 2:
                 img = self._get_one_img(image_path)
                 img_next = self._get_one_img(self.images_path[index+1])
@@ -666,8 +740,10 @@ class RobotEnvDataset(torch.utils.data.Dataset):
                 next_action = self.actions[index+1]
                 target_pos = self.all_imgs_target_pos[index]
                 next_target_pos = self.all_imgs_target_pos[index+1]
+                robot_pos = self.relative_positions[index]
+                next_robot_pos = self.relative_positions[index+1]
                 
-                return img.astype(self.dtype), img_next.astype(self.dtype), reward,action, next_action, target_pos, next_target_pos    
+                return img.astype(self.dtype), img_next.astype(self.dtype), reward,action, next_action, target_pos, next_target_pos, robot_pos, next_robot_pos  
             else:
                 return
 
@@ -681,7 +757,6 @@ class RobotEnvDataset(torch.utils.data.Dataset):
                     raise ValueError("tried to load {}_{}.jpg, but it was not found".format(image_path, i + 1))
                 images.append(preprocessImage(img, img_reshape=self.img_shape, apply_occlusion=self.apply_occlusion,
                                               occlusion_percentage=self.occlusion_percentage))
-            ####################
             # loading a negative observation
             if use_triplets:
                 # End of file format for positive & negative observations (camera 1) - length : 6 characters

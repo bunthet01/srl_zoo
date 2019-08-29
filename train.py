@@ -33,7 +33,7 @@ if __name__ == '__main__':
     parser.add_argument('-bs', '--batch-size', type=int, default=32, help='batch_size (default: 32)')
     parser.add_argument('--val-size', type=float, default=0.2, help='Validation set size in percentage (default: 0.2)')
     parser.add_argument('--training-set-size', type=int, default=-1,
-                        help='Limit size (number of samples) of the training set (default: -1)')
+                        help='Limit size (number of samples) of the training set (default: -1)')			# for now, we use the default value, there might be an error when use smaller size
     parser.add_argument('-lr', '--learning-rate', type=float, default=0.0005, help='learning rate (default: 0.005)')
     parser.add_argument('-lr_G', '--learning-rate-G', type=float, default=1.0 *
                         1e-5, help='learning rate GAN: Generator (default: None)')
@@ -62,7 +62,7 @@ if __name__ == '__main__':
                         help='Force balanced sampling for episode independent prior instead of uniform')
     parser.add_argument('--losses', nargs='+', default=[], **parseLossArguments(
         choices=["forward", "inverse", "reward", "reward2", "spcls", "priors", "episode-prior", "reward-prior", "triplet",
-                 "autoencoder", "vae","cvae", "perceptual", "dae", "random", "gan","cgan", "gan_new", "cgan_new"],
+                 "autoencoder", "vae","cvae", "perceptual", "dae", "random", "gan","cgan", "gan_new", "cgan_new", "cvae_new"],
         help='The wanted losses. One may also want to specify a weight and dimension '
              'that apply as follows: "<name>:<weight>:<dimension>".'))
     parser.add_argument('--beta', type=float, default=1.0,
@@ -165,7 +165,10 @@ if __name__ == '__main__':
     assert not ("dae" in losses and "perceptual" in losses), \
         "Please learn the DAE before learning a VAE with the perceptual loss "
     assert not (args.use_cci and ("vae" not in losses and "cvae" not in losses)), "cci cannot used without vae or cvae"
-    # assert not ("cvae" in losses and len(losses) > 1), "cvae cannot used with other losses"
+    assert not ("cvae" in losses and "cvae_new" in losses), "can not cvae and cvae_new at the same time"
+    assert not ("cgan" in losses and len(losses)>1), "can not use cgan with other models"
+    assert not ("cgan_new" in losses and len(losses)>1), "can not use cgan_new with other models"
+    
 
     print('Loading data ... ')
 

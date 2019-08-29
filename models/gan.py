@@ -22,23 +22,22 @@ class DiscriminatorDC(nn.Module):
         assert self.img_shape[0] < 10, "Pytorch uses 'channel first' convention."
         ndf = img_shape[1]
         nc = img_shape[0]
-        self.main = nn.Sequential(
-            # input is (nc) x 64 x 64
+        self.main = nn.Sequential
             nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf) x 32 x 32
+            
             nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ndf * 2),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*2) x 16 x 16
+            
             nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ndf * 4),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*4) x 8 x 8
+            
             nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ndf * 8),
             nn.LeakyReLU(0.2, inplace=True),
-            # state size. (ndf*8) x 4 x 4
+            
             nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False),
             nn.Sigmoid()
         )
@@ -57,26 +56,26 @@ class GeneratorDC(nn.Module):
         ngf = img_shape[1]
         nc = img_shape[0]
         self.main = nn.Sequential(
-            # input is Z, going into a convolution
+            
             nn.ConvTranspose2d(     nz, ngf * 8, 4, 1, 0, bias=False),
             nn.BatchNorm2d(ngf * 8),
             nn.ReLU(True),
-            # state size. (ngf*8) x 4 x 4
+            
             nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf * 4),
             nn.ReLU(True),
-            # state size. (ngf*4) x 8 x 8
+            
             nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf * 2),
             nn.ReLU(True),
-            # state size. (ngf*2) x 16 x 16
+            
             nn.ConvTranspose2d(ngf * 2,     ngf, 4, 2, 1, bias=False),
             nn.BatchNorm2d(ngf),
             nn.ReLU(True),
-            # state size. (ngf) x 32 x 32
+            
             nn.ConvTranspose2d(    ngf,      nc, 4, 2, 1, bias=False),
             nn.Tanh()
-            # state size. (nc) x 64 x 64
+           
         )
 
     def forward(self, input):
@@ -177,24 +176,24 @@ class Discriminator(nn.Module):
 
         start_chs = self.img_shape[0]
         self.modules_list.extend(
-            d_layer(start_chs, self.d_chs, spectral_norm=self.spectral_norm))       #torch.Size([4, 16, 32, 32], (bs=4, img_shape=(3,64,64), state_dim=200)
+            d_layer(start_chs, self.d_chs, spectral_norm=self.spectral_norm))      
         self.modules_list.extend(
-            d_layer(self.d_chs, self.d_chs*2, spectral_norm=self.spectral_norm))    #torch.Size([4, 32, 16, 16])
+            d_layer(self.d_chs, self.d_chs*2, spectral_norm=self.spectral_norm))    
         self.modules_list.extend(
-            d_layer(self.d_chs*2, self.d_chs*4, spectral_norm=self.spectral_norm))  #torch.Size([4, 64, 8, 8])
+            d_layer(self.d_chs*2, self.d_chs*4, spectral_norm=self.spectral_norm))  
         self.modules_list.extend(
-            d_layer(self.d_chs*4, self.d_chs*8, spectral_norm=self.spectral_norm))  #torch.Size([4, 128, 4, 4]) 
+            d_layer(self.d_chs*4, self.d_chs*8, spectral_norm=self.spectral_norm))   
         self.modules_list.extend(
-            d_layer(self.d_chs*8, self.d_chs*8, spectral_norm=self.spectral_norm))  #torch.Size([4, 128, 2, 2])
+            d_layer(self.d_chs*8, self.d_chs*8, spectral_norm=self.spectral_norm)) 
 
         if self.spectral_norm:
             self.modules_list.append(ConvSN2d(self.d_chs*8, self.d_chs*4,
-                                              kernel_size=3, stride=1, padding=1))  #torch.Size([4, 64, 2, 2])
+                                              kernel_size=3, stride=1, padding=1))  
 
-            last_channels = self.modules_list[-1].out_channels                      #64
+            last_channels = self.modules_list[-1].out_channels                      
             times = COUNT_IMG_REDUCE
             in_features = last_channels * \
-                (self.img_shape[1]//2**times) * (self.img_shape[2]//2**times)       #256
+                (self.img_shape[1]//2**times) * (self.img_shape[2]//2**times)      
             self.before_last = LinearSN(in_features, self.state_dim, bias=True)
             self.last = LinearSN(self.state_dim, 1, bias=True)
         else:
@@ -211,12 +210,12 @@ class Discriminator(nn.Module):
     def forward(self, x):
         for layer in self.modules_list:
             x = layer(x)
-        x = x.view(x.size(0), -1)  # flatten    #torch.Size([4, 256])
-        x = self.activations['lrelu'](x)        #torch.Size([4, 256])
-        x = self.before_last(x)                 #torch.Size([4, 200])
-        x = self.activations['lrelu'](x)        #torch.Size([4, 200])
-        x = self.last(x)                        #torch.Size([4, 1])
-        x = self.activations['sigmoid'](x)      #torch.Size([4, 1])
+        x = x.view(x.size(0), -1)   
+        x = self.activations['lrelu'](x)        
+        x = self.before_last(x)                 
+        x = self.activations['lrelu'](x)        
+        x = self.last(x)                       
+        x = self.activations['sigmoid'](x)     
         return x
 
 
@@ -284,7 +283,7 @@ class EncoderUnet(BaseModelSRL):
         x = self.unet(x)
         for layer in self.modules_list:
             x = layer(x)
-        x = x.view(x.size(0), -1)  # flatten
+        x = x.view(x.size(0), -1)  
         x = self.before_last(x)
         x = self.activations['lrelu'](x)
         x = self.last(x)
@@ -468,7 +467,7 @@ class GANTrainer(BaseTrainer):
 
     def train_on_batch_D(self, obs, label_valid, label_fake, optimizer, loss_manager, valid_mode=False, device=torch.device('cpu')):
         sample_state = torch.randn((obs.size(0), self.state_dim), requires_grad=False).to(device)
-        fake_img = self.generator(sample_state)	 #torch.Size([4, 3, 64, 64])
+        fake_img = self.generator(sample_state)	 
         # fake_loss
         fake_img_rating = self.discriminator(fake_img.detach())
         ganNonSaturateLoss(fake_img_rating, label_fake, weight=1.0, loss_manager=loss_manager, name="ns_loss_D_fake")

@@ -55,9 +55,13 @@ class BaseLearner(object):
     :param batch_size: (int)
     :param seed: (int)
     :param cuda: (int) (default -1, CPU) equi to CUDA_VISIBLE_DEVICES
+    :param class_dim: (int) dimension of action
+    :param use_conditional_model: (boolean) if cvae is used 
+    :param only_action: (boolean) if we don't use target postion as codition to conditional model 
+    :param use_cvae_new: (boolean) if cvae_new is used
     """
 
-    def __init__(self, state_dim, class_dim, batch_size, seed=1, cuda=-1, use_conditional_model=False, only_action=False):
+    def __init__(self, state_dim, class_dim, batch_size, seed=1, cuda=-1, use_conditional_model=False, only_action=False, use_cvae_new=False):
         super(BaseLearner, self).__init__()
         self.state_dim = state_dim
         self.class_dim = class_dim
@@ -67,6 +71,7 @@ class BaseLearner(object):
         self.use_dae = False
         self.use_conditional_model = use_conditional_model
         self.only_action = only_action
+        self.use_cvae_new = use_cvae_new
         assert not self.use_dae, "Not implemented error."
         # Seed the random generator
         np.random.seed(seed)
@@ -78,7 +83,7 @@ class BaseLearner(object):
 
         self.device = torch.device("cuda:{}".format(cuda) if torch.cuda.is_available() and (cuda >= 0) else "cpu")
 
-    def _predFn(self, observations, action,target_pos, use_conditional_model):
+    def _predFn(self, observations, action,target_pos,robot_pos, use_conditional_model, use_cvae_new):
         """
         Predict states in test mode given observations
 
@@ -88,6 +93,8 @@ class BaseLearner(object):
         # Move the tensor back to the cpu
         if use_conditional_model:
             return detachToNumpy(self.module.model(observations, action, target_pos, self.only_action))
+        elif use_cvae_new:
+            return detachToNumpy(self.module.model(observations,target_pos,robot_pos))
         else:
             return detachToNumpy(self.module.model(observations))
 
@@ -102,7 +109,8 @@ class BaseLearner(object):
             obs = batch[0].to(self.device)
             action = batch[1].to(self.device)
             target_pos = batch[2].to(self.device)
-            predictions.append(self._predFn(obs, action, target_pos, self.use_conditional_model))
+            robot_pos = batch[3].to(self.device)
+            predictions.append(self._predFn(obs, action, target_pos,robot_pos, self.use_conditional_model, self.use_cvae_new))
 
         return np.concatenate(predictions, axis=0)
 
@@ -115,13 +123,18 @@ class BaseLearner(object):
         predictions = []
         gt_reward = []
 
-        for obs, obs_next, rwd, action, next_action,target_pos, next_target_pos in data_loader:
+        for obs, obs_next, rwd, action, next_action,target_pos, next_target_pos, robot_pos, next_robot_pos in data_loader:
             if reward_name == 'reward':
                 obs = obs.to(self.device)
                 if self.use_conditional_model:
                     action =  action.to(self.device)
                     target_pos  = target_pos.to(self.device)
+
                     states = self.module.model(obs, action, target_pos, self.only_action)
+                elif self.use_cvae_new:
+                    target_pos  = target_pos.to(self.device)
+                    robot_pos = robot_pos.to(self.device)
+                    states = self.module.model(obs, target_pos, robot_pos)
                 else:
                     states = self.module.model(obs)
                 if split_dim_list is not None:
@@ -131,6 +144,10 @@ class BaseLearner(object):
                 next_action = next_action.to(self.device)
                 next_target_pos = next_target_pos.to(self.device)
                 states_next = self.module.model(obs_next, next_action, next_target_pos, self.only_action)
+            elif self.use_cvae_new:
+                    next_target_pos  = next_target_pos.to(self.device)
+                    next_robot_pos = next_robot_pos.to(self.device)
+                    states_next = self.module.model(obs_next, next_target_pos, next_robot_pos)
             else:
                 states_next = self.module.model(obs_next)
             if split_dim_list is not None:
@@ -222,7 +239,7 @@ class SRL4robotics(BaseLearner):
                  multi_view=False, losses=None, losses_weights_dict=None, n_actions=6, beta=1, Cmax=50, use_cci=False,
                  split_dimensions=-1, path_to_dae=None, state_dim_dae=200, occlusion_percentage=None):
 
-        super(SRL4robotics, self).__init__(state_dim, class_dim, BATCH_SIZE, seed, cuda, use_conditional_model="cvae" in losses, only_action=only_action)
+        super(SRL4robotics, self).__init__(state_dim, class_dim, BATCH_SIZE, seed, cuda, use_conditional_model="cvae" in losses, only_action=only_action, use_cvae_new="cvae_new" in losses)
 
         self.multi_view = multi_view
         self.losses = losses
@@ -251,6 +268,7 @@ class SRL4robotics(BaseLearner):
             self.use_autoencoder = "autoencoder" in losses
             self.use_vae = "vae" in losses
             self.use_cvae = "cvae" in losses
+            self.use_cvae_new = "cvae_new" in losses
             self.use_triplets = "triplet" in self.losses
             # self.perceptual_similarity_loss = "perceptual" in self.losses
             self.use_dae = "dae" in self.losses
@@ -413,19 +431,19 @@ class SRL4robotics(BaseLearner):
         indices_train, indices_val = sample_indices[:-valid_size], sample_indices[-valid_size:]
         
         all_imgs_target_pos = attach_target_pos_to_all_imgs(images_path, target_positions)     
-        train_set = RobotEnvDataset(indices_train, images_path, actions,all_imgs_target_pos, rewards, episode_starts,
+        train_set = RobotEnvDataset(indices_train, images_path, actions,all_imgs_target_pos,relative_positions, rewards, episode_starts,
                                     mode=1, img_shape=self.img_shape, multi_view=self.multi_view,
                                     use_triplets=self.use_triplets, apply_occlusion=self.use_dae,
                                     occlusion_percentage=self.occlusion_percentage, dtype=np.float32)
-        valid_set = RobotEnvDataset(indices_val, images_path, actions,all_imgs_target_pos, rewards, episode_starts,
+        valid_set = RobotEnvDataset(indices_val, images_path, actions,all_imgs_target_pos,relative_positions, rewards, episode_starts,
                                     mode=1, img_shape=self.img_shape, multi_view=self.multi_view,
                                     use_triplets=self.use_triplets, apply_occlusion=self.use_dae,
                                     occlusion_percentage=self.occlusion_percentage, dtype=np.float32)
-        test_set = RobotEnvDataset(np.arange(len(images_path)), images_path, actions,all_imgs_target_pos, rewards, episode_starts,
+        test_set = RobotEnvDataset(np.arange(len(images_path)), images_path, actions,all_imgs_target_pos,relative_positions, rewards, episode_starts,
                                    mode=0, img_shape=self.img_shape, multi_view=self.multi_view,
                                    use_triplets=self.use_triplets, apply_occlusion=self.use_dae,
                                    occlusion_percentage=self.occlusion_percentage, dtype=np.float32)
-        test_set2 = RobotEnvDataset(np.arange(len(images_path)), images_path, actions,all_imgs_target_pos, rewards, episode_starts,
+        test_set2 = RobotEnvDataset(np.arange(len(images_path)), images_path, actions,all_imgs_target_pos,relative_positions, rewards, episode_starts,
                                     mode=2, img_shape=self.img_shape, multi_view=self.multi_view,
                                     use_triplets=self.use_triplets, apply_occlusion=self.use_dae,
                                     occlusion_percentage=self.occlusion_percentage, dtype=np.float32)
@@ -533,7 +551,7 @@ class SRL4robotics(BaseLearner):
                 if self.debug:
                     n_batch_per_epoch = 1
                 for iter_ind in range(n_batch_per_epoch):
-                    (sample_idx, obs, next_obs, action, next_action, reward, cls_gt, target_pos, next_target_pos) = next(dataloader)
+                    (sample_idx, obs, next_obs, action, next_action, reward, cls_gt, target_pos, next_target_pos, robot_pos, next_robot_pos) = next(dataloader)
                     obs, next_obs = obs.to(self.device), next_obs.to(self.device)
                     cls_gt = cls_gt.to(self.device)
 
@@ -560,6 +578,15 @@ class SRL4robotics(BaseLearner):
                             target_pos = target_pos.to(self.device)
                             next_target_pos = next_target_pos.to(self.device)
                             states, next_states = self.module.model(obs, action,target_pos, self.only_action), self.module.model(next_obs, next_action,next_target_pos,self.only_action)
+                            actions_st = action.view(-1, 1).to(self.device)
+                        elif self.use_cvae_new: 
+                            action = action.to(self.device)
+                            next_action = next_action.to(self.device)
+                            robot_pos = robot_pos.to(self.device)
+                            next_robot_pos = next_robot_pos.to(self.device)
+                            target_pos = target_pos.to(self.device)
+                            next_target_pos = next_target_pos.to(self.device)
+                            states, next_states = self.module.model(obs,target_pos,robot_pos ), self.module.model(next_obs,next_target_pos,next_robot_pos)
                             actions_st = action.view(-1, 1).to(self.device)
                         else:
                             states, next_states = self.module(obs), self.module(next_obs)
@@ -729,6 +756,13 @@ class SRL4robotics(BaseLearner):
                             target_pos = target_pos.to(self.device)
                             next_target_pos = next_target_pos.to(self.device)
                             loss = self.module.model.train_on_batch(obs, next_obs, action, next_action,target_pos, next_target_pos, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c,self.only_action )
+                        elif self.use_cvae_new:
+                            target_pos = target_pos.to(self.device)
+                            next_target_pos = next_target_pos.to(self.device)
+                            robot_pos = robot_pos.to(self.device)
+                            next_robot_pos = next_robot_pos.to(self.device)
+                            
+                            loss = self.module.model.train_on_batch(obs, next_obs,target_pos, next_target_pos,robot_pos, next_robot_pos, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c)
                         elif self.use_vae:
                             loss = self.module.model.train_on_batch(obs, next_obs, self.optimizer, loss_manager, valid_mode, self.device, self.beta, c)
                         else:
@@ -867,7 +901,6 @@ class SRL4robotics(BaseLearner):
                         loss_history[key].append(0)
                 return loss_history
 
-            # if (self.use_gan or self.use_cgan) and not valid_mode:
             if self.use_gan or self.use_cgan:      
                 loss_history = update_loss_history(loss_manager, train_loss,"train_loss_E", val_loss, "val_loss_E", epoch_batches_E_train, epoch)
                 loss_history_D = update_loss_history(loss_manager_D, train_loss_D,"train_loss_D", 0, "val_loss_D", epoch_batches_D_train, epoch)
@@ -941,11 +974,13 @@ class SRL4robotics(BaseLearner):
                                                name="Learned State Representation (Training Data)",
                                                path=os.path.join(figdir_repr, "Epoch_{}.png".format(epoch+1)))
                             printGTC(state_pred, ground_truth, target_positions, truncate=truncate)
-                            if self.use_autoencoder or self.use_vae or self.use_cvae or self.use_dae or self.use_gan or self.use_cgan:
+                            if self.use_autoencoder or self.use_vae or self.use_cvae or self.use_cvae_new or self.use_dae or self.use_gan or self.use_cgan:
                                 # Plot Reconstructed Image
                                 if obs[0].shape[0] == 3:  # RGB
                                     if self.use_cvae or self.use_cgan:
                                         reconstruct_obs = self.module.model.reconstruct(obs, action.to(self.device), target_pos.to(self.device),self.only_action)
+                                    elif self.use_cvae_new:
+                                        reconstruct_obs = self.module.model.reconstruct(obs,target_pos.to(self.device),robot_pos.to(self.device))
                                     else:
                                         reconstruct_obs = self.module.model.reconstruct(obs)
                                     # , normalize=True, range=(0,1)

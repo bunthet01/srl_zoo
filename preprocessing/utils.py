@@ -71,6 +71,7 @@ def deNormalize(x, mode="tf"):
 
 def one_hot(x):
     """
+    Convert action to onehot tensor. (used for cvae.py)
     :param x: th.tensor() or np.ndarray() or list
     :return: th.FloatTensor()
     """
@@ -92,6 +93,10 @@ def one_hot(x):
     return th.FloatTensor(result)
     
 def gaussian_target(img_shape, t, MAX_X=0.85, MIN_X=-0.85, MAX_Y=0.85, MIN_Y=-0.85, sigma2=10):
+    """
+    Create a gaussian bivariate tensor for target or robot position.
+    :param t: (th.Tensor) Target position (or robot position)
+    """
     X_range = img_shape[1]
     Y_range = img_shape[2]
     XY_range = np.arange(X_range*Y_range)
@@ -106,6 +111,10 @@ def gaussian_target(img_shape, t, MAX_X=0.85, MIN_X=-0.85, MAX_Y=0.85, MIN_Y=-0.
     return output
 
 def attach_target_pos_to_all_imgs(images_path, target_pos):
+    """
+    The target_positions in ground_truth.npz equal to the number of episode.
+    This function will attach the target_position to every frames.
+    """
     all_target_pos = np.zeros((images_path.shape[0],2))
     for i in range(images_path.shape[0]):
         x = re.findall("_[0-9][0-9][0-9]", images_path[i])
@@ -115,6 +124,9 @@ def attach_target_pos_to_all_imgs(images_path, target_pos):
 
 
 def sample_target_pos(batch_size,TARGET_MAX_X, TARGET_MIN_X, TARGET_MAX_Y, TARGET_MIN_Y):
+    """
+    Sample target_position or robot_position by respecting to their limits.
+    """
     random_init_x = np.random.random_sample(batch_size) * (TARGET_MAX_X - TARGET_MIN_X) + \
                     TARGET_MIN_X
     random_init_y = np.random.random_sample(batch_size) * (TARGET_MAX_Y - TARGET_MIN_Y) + \

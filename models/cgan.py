@@ -1,3 +1,7 @@
+###################################################################
+# see the difference between cgan.py and cgan_new.py in cgan_new.py
+###################################################################
+
 import numpy as np
 import torch
 from torch import nn
@@ -23,6 +27,11 @@ except:
 from torchsummary import summary
 
 class GeneratorUnet(nn.Module):
+     """
+    GeneratorUnet. Two conditions are used : action and target_position.
+    Parameter "only_action" is used to use only "action" as condition.
+    :param label_dim: (th.Tensor) dimension of the action.
+    """
     def __init__(self, state_dim, img_shape, label_dim,
                  unet_depth=2,  # 3
                  unet_ch=16,  # 32
@@ -94,7 +103,9 @@ class GeneratorUnet(nn.Module):
         
 class GeneratorResNet(BaseModelSRL):
     """
-    ResNet Generator
+    ResNet Generator. Two conditions are used : action and target_position.
+    Parameter "only_action" is used to use only "action" as condition.
+    :param label_dim: (th.Tensor) dimension of the action.
     """
 
     def __init__(self, state_dim, img_shape, label_dim, in_shape, spectral_norm=False, device='cpu', only_action=False):
@@ -173,6 +184,11 @@ class GeneratorResNet(BaseModelSRL):
 
 
 class Discriminator(nn.Module):
+    """
+    Discriminator. Two conditions are used : action and target_position.
+    Parameter "only_action" is used to use only "action" as condition.
+    :param label_dim: (th.Tensor) dimension of the action.
+    """
     def __init__(self, state_dim, img_shape,label_dim,
                  spectral_norm=False,device='cpu',only_action=False,
                  d_chs=16):  # 32
@@ -267,7 +283,6 @@ class Discriminator(nn.Module):
 
 class EncoderUnet(BaseModelSRL):
     """
-
     Note: Only EncoderUnet has getStates method.
     """
 
@@ -330,7 +345,6 @@ class EncoderUnet(BaseModelSRL):
 
 class EncoderResNet(BaseModelSRL):
     """
-
     Note: Only Encoder has getStates method.
     """
 
@@ -495,7 +509,7 @@ class CGANTrainer(BaseTrainer):
             for _ in range(D_steps):
                 optimizer_D.zero_grad()
                 loss_manager_D.resetLosses()
-                (sample_idx, obs, next_obs, action,_, reward, cls_gt, target_pos, next_target_pos) = next(dataloader)
+                (sample_idx, obs, next_obs, action,_, reward, cls_gt, target_pos, next_target_pos,_,_) = next(dataloader)
                 cls_gt = cls_gt.to(device)
                 obs = obs.to(device)
                 action = action.to(device)
@@ -512,7 +526,7 @@ class CGANTrainer(BaseTrainer):
             for _ in range(G_steps):
                 optimizer_G.zero_grad()
                 loss_manager_G.resetLosses()
-                (sample_idx, obs, next_obs, action,_, reward, cls_gt, target_pos, next_target_pos) = next(dataloader)
+                (sample_idx, obs, next_obs, action,_, reward, cls_gt, target_pos, next_target_pos,_,_) = next(dataloader)
                 cls_gt = cls_gt.to(device)
                 obs = obs.to(device)
                 # re-define the length label_valid, because obs.size(0) changes
@@ -527,7 +541,7 @@ class CGANTrainer(BaseTrainer):
         for _ in range(E_steps):
             optimizer_E.zero_grad()
             loss_manager_E.resetLosses()
-            (sample_idx, obs, next_obs, action,next_action, reward, cls_gt, target_pos, next_target_pos) = next(dataloader)
+            (sample_idx, obs, next_obs, action,next_action, reward, cls_gt, target_pos, next_target_pos,_,_) = next(dataloader)
             obs, next_obs = obs.to(device), next_obs.to(device)
             action, next_action = action.to(device), next_action.to(device)
             cls_gt = cls_gt.to(device)

@@ -1,3 +1,7 @@
+###################################################################
+# see the difference between cvae.py and cave_new.py in cvae_new.py
+###################################################################
+
 from __future__ import print_function, division, absolute_import
 
 from torch.autograd import Variable
@@ -13,7 +17,7 @@ try:
     from ..preprocessing.utils import one_hot, gaussian_target
     import sys
     sys.path.append("..")
-    from real_robots.constants import MIN_X, MAX_X, MIN_Y, MAX_Y
+    from real_robots.constants import MIN_X, MAX_X, MIN_Y, MAX_Y		# working with "Omnirobot-env"
 except:
     # absolute import: when executing directly: python train.py ...
     from models.base_models import BaseModelVAE
@@ -21,14 +25,18 @@ except:
     from preprocessing.utils import one_hot, gaussian_target
     import sys
     sys.path.append("..")
-    from real_robots.constants import MIN_X, MAX_X, MIN_Y, MAX_Y
+    from real_robots.constants import MIN_X, MAX_X, MIN_Y, MAX_Y		# working with "Omnirobot-env"
 
 
 class DenseCVAE(BaseModelVAE):
     """
-    Dense CVAE network
+    Dense CVAE network with two condition : "action" and "target" position.
+    Parameter "only_action" is used to use only "action" as condition.
     :param state_dim: (int)
-    :param img_shape: (tuple)
+    :param img_shape: (th.Tensor)
+    :param class_dim: (th.Tensor) dimension of "actions"
+    :param device: (string) "cpu" or "gpu"
+    :param only_action: (boolean) use only "action" as condition 
     """
 
     def __init__(self, state_dim, class_dim, img_shape,device,only_action):
@@ -68,6 +76,13 @@ class DenseCVAE(BaseModelVAE):
         self.sigmoid = nn.Sigmoid()
 
     def encode_cvae(self, x, c, t, only_action):
+        """
+        :param x:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
+        """
         # Flatten input
         x = x.view(x.size(0), -1)
         if only_action:
@@ -78,6 +93,13 @@ class DenseCVAE(BaseModelVAE):
         return self.encoder_fc21(concat_input), self.encoder_fc22(concat_input)
 
     def decode_cvae(self, z, c, t, only_action):
+        """
+        :param z:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
+        """
         if only_action:
             concat_input = th.cat([z, one_hot(c).to(self.device)], 1)
         else:
@@ -86,9 +108,12 @@ class DenseCVAE(BaseModelVAE):
     
     def compute_tensor_cvae(self, x, c, t, only_action):
         """
-        :param x: (th.Tensor)
-        :param c: (th.Tensor)
-        :return: (th.Tensor)
+        Forward input into the network.(used for training)
+        :param x:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
         """
         input_shape = x.size()
         mu, logvar = self.encode_cvae(x, c, t, only_action)
@@ -100,7 +125,13 @@ class DenseCVAE(BaseModelVAE):
 
 class CNNCVAE(BaseModelVAE):
     """
-    Convolutional neural network for Conditional variational auto-encoder
+    Convolutional neural network for CVAE with two condition : "action" and "target" position.
+    Parameter "only_action" is used to use only "action" as condition.
+    :param state_dim: (int)
+    :param img_shape: (th.Tensor)
+    :param class_dim: (th.Tensor) dimension of "actions"
+    :param device: (string) "cpu" or "gpu"
+    :param only_action: (boolean) use only "action" as condition 
 
     """
     def __init__(self, state_dim=3,class_dim=1, img_shape=(3, 224, 224),device='cpu',only_action=False):
@@ -124,10 +155,11 @@ class CNNCVAE(BaseModelVAE):
                 )
     def encode_cvae(self, x, c, t, only_action):
         """
-        :param x: (th.Tensor)
-        :param c: (th.Tensor)
-        :return: (th.Tensor)
-
+        :param x:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
         """
         
         x = self.encoder_conv(x)
@@ -140,9 +172,11 @@ class CNNCVAE(BaseModelVAE):
 
     def decode_cvae(self, z, c, t, only_action):
         """
-        :param z: (th.Tensor)
-        :param c: (th.Tensor)
-        :return: (th.Tensor)
+        :param z:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
         """
         if only_action: 
             concat_input = th.cat([z, one_hot(c).to(self.device)], 1)
@@ -154,9 +188,11 @@ class CNNCVAE(BaseModelVAE):
 
     def compute_tensor_cvae(self, x, c, t, only_action):
         """
-        :param x: (th.Tensor)
-        :param c: (th.Tensor)
-        :return: (th.Tensor)
+        :param x:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
         """
         input_shape = x.size()
         mu, logvar = self.encode_cvae(x, c, t, only_action)
@@ -166,7 +202,17 @@ class CNNCVAE(BaseModelVAE):
         
 class CNNCVAE_NEW(BaseModelVAE):
     """
-    Convolutional neural network for Conditional variational auto-encoder
+    Convolutional neural network for CVAE with two condition : "action" and "target" position.
+    Parameter "only_action" is used to use only "action" as condition. Appart from CNNCVAE, it 
+    convert the "action" into 4-chanel tensor and "target_position" into 1-chanel tensor for the encoder only.
+    For decoder, "action" and "target_position" has the same dimension as CNNCVAE.
+    This idea is inspired by https://github.com/togheppi/cDCGAN/blob/master/CelebA_cDCGAN_pytorch.py.
+    
+    :param state_dim: (int)
+    :param img_shape: (th.Tensor)
+    :param class_dim: (th.Tensor) dimension of "actions"
+    :param device: (string) "cpu" or "gpu"
+    :param only_action: (boolean) use only "action" as condition 
 
     """
     def __init__(self, state_dim=3,class_dim=1, img_shape=(3, 224, 224), device='cpu', only_action=False):
@@ -178,6 +224,13 @@ class CNNCVAE_NEW(BaseModelVAE):
         self.only_action = only_action
         self.encoder_fc1 = nn.Linear(self.img_height * self.img_width * 64, state_dim)
         self.encoder_fc2 = nn.Linear(self.img_height * self.img_width * 64, state_dim)
+        
+        self.one_hot = th.zeros(self.class_dim, self.class_dim)
+        self.one_hot = self.one_hot.scatter(1, th.arange(self.class_dim).type(th.LongTensor).view(self.class_dim,1), 1).view(self.class_dim, self.class_dim, 1, 1)
+        self.fill = th.zeros([self.class_dim, self.class_dim, self.img_shape[1], self.img_shape[2]])
+        for i in range(self.class_dim):
+            self.fill[i, i, :, :] = 1
+        
         if self.only_action:
             self.decoder_fc = nn.Sequential(
                 nn.Linear(state_dim+self.class_dim, self.img_height * self.img_width * 64)
@@ -186,7 +239,6 @@ class CNNCVAE_NEW(BaseModelVAE):
             self.decoder_fc = nn.Sequential(
                 nn.Linear(state_dim+self.class_dim+2, self.img_height * self.img_width * 64)
                 )
-        #########
         def conv3x3(in_planes, out_planes, stride=1):
             """"
             From PyTorch Resnet implementation
@@ -197,54 +249,48 @@ class CNNCVAE_NEW(BaseModelVAE):
             """
             return nn.Conv2d(in_planes, out_planes, kernel_size=3, stride=stride,
                              padding=1, bias=False)
-        self.one_hot = th.zeros(self.class_dim, self.class_dim)
-        self.one_hot = self.one_hot.scatter(1, th.arange(self.class_dim).type(th.LongTensor).view(self.class_dim,1), 1).view(self.class_dim, self.class_dim, 1, 1)
-        self.fill = th.zeros([self.class_dim, self.class_dim, self.img_shape[1], self.img_shape[2]])
-        for i in range(self.class_dim):
-            self.fill[i, i, :, :] = 1
         if self.only_action:
             self.encoder_conv_new = nn.Sequential(
-                # 224x224xN_CHANNELS -> 112x112x64
                 nn.Conv2d(self.img_shape[0]+self.class_dim, 64, kernel_size=7, stride=2, padding=3, bias=False),
                 nn.BatchNorm2d(64),
                 nn.ReLU(),
-                nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 56x56x64
+                nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  
 
-                conv3x3(in_planes=64, out_planes=64, stride=1),  # 56x56x64
+                conv3x3(in_planes=64, out_planes=64, stride=1),  
                 nn.BatchNorm2d(64),
                 nn.ReLU(),
-                nn.MaxPool2d(kernel_size=3, stride=2),  # 27x27x64
+                nn.MaxPool2d(kernel_size=3, stride=2),  
 
-                conv3x3(in_planes=64, out_planes=64, stride=2),  # 14x14x64
+                conv3x3(in_planes=64, out_planes=64, stride=2), 
                 nn.BatchNorm2d(64),
                 nn.ReLU(),
-                nn.MaxPool2d(kernel_size=3, stride=2)  # 6x6x64
+                nn.MaxPool2d(kernel_size=3, stride=2)  
             )
         else:  
             self.encoder_conv_new = nn.Sequential(
-                # 224x224xN_CHANNELS -> 112x112x64
                 nn.Conv2d(self.img_shape[0]+self.class_dim+1, 64, kernel_size=7, stride=2, padding=3, bias=False),
                 nn.BatchNorm2d(64),
                 nn.ReLU(),
-                nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # 56x56x64
+                nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  
 
-                conv3x3(in_planes=64, out_planes=64, stride=1),  # 56x56x64
+                conv3x3(in_planes=64, out_planes=64, stride=1),  
                 nn.BatchNorm2d(64),
                 nn.ReLU(),
-                nn.MaxPool2d(kernel_size=3, stride=2),  # 27x27x64
+                nn.MaxPool2d(kernel_size=3, stride=2),  
 
-                conv3x3(in_planes=64, out_planes=64, stride=2),  # 14x14x64
+                conv3x3(in_planes=64, out_planes=64, stride=2),  
                 nn.BatchNorm2d(64),
                 nn.ReLU(),
-                nn.MaxPool2d(kernel_size=3, stride=2)  # 6x6x64
+                nn.MaxPool2d(kernel_size=3, stride=2)  
             )
         
     def encode_cvae(self, x, c, t, only_action):
         """
-        :param x: (th.Tensor)
-        :param c: (th.Tensor)
-        :return: (th.Tensor)
-
+        :param x:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
         """
         
         c = self.fill[c.long()].to(self.device)
@@ -259,9 +305,11 @@ class CNNCVAE_NEW(BaseModelVAE):
 
     def decode_cvae(self, z, c, t, only_action):
         """
-        :param z: (th.Tensor)
-        :param c: (th.Tensor)
-        :return: (th.Tensor)
+        :param z:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
         """
         if only_action:
             concat_input = th.cat([z, one_hot(c).to(self.device)], 1)
@@ -273,9 +321,12 @@ class CNNCVAE_NEW(BaseModelVAE):
 
     def compute_tensor_cvae(self, x, c, t, only_action):
         """
-        :param x: (th.Tensor)
-        :param c: (th.Tensor)
-        :return: (th.Tensor)
+        Forward the input to the network.(Used for training)
+        :param x:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
         """
         input_shape = x.size()
         mu, logvar = self.encode_cvae(x, c, t, only_action)
@@ -323,15 +374,45 @@ class CVAETrainer(nn.Module):
         return loss
 
     def reconstruct(self, x, c, t, only_action):
+        """
+        Reconstruct images.
+        :param x:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
+        """
         return self.model.decode_cvae(self.model.encode_cvae(x,c,t,only_action)[0], c, t,only_action)
 
-    def encode(self, x, c, t, only_action):
+    def encode(self, x, c, t, only_action): 
+        """
+        :param x:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
+        """
+    
         return self.model.encode_cvae(x, c, t, only_action)
 
     def decode(self, z, c, t, only_action):
+        """
+        :param x:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
+        """
         return self.model.decode_cvae(z, c, t, only_action)
 
     def forward(self, x, c, t, only_action):
+        """
+        :param x:(th.Tensor)
+        :param c:(th.Tensor)
+        :param t:(th.Tensor)
+        :param only_action: (boolean)
+        
+        """
         return self.model.encode_cvae(x, c, t, only_action)[0] 
 
 if __name__ == "__main__":
